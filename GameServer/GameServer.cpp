@@ -134,4 +134,5 @@ int main()
 // --> ServerPacketHandler를 수정, 얘를 기반으로 만들거라 깔끔하게 작업하는게 중요
 // 
 // 엥 나 근데 왜 커밋했는데 contribution에 안뜸?
+// email이 다른 것 같아서 같은 이메일로 보내보겠다..
 //
