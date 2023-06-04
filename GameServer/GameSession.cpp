@@ -15,7 +15,16 @@ void GameSession::OnDisconnected()
 
 void GameSession::OnRecvPacket(BYTE* buffer, int32 len)
 {
-	ServerPacketHandler::HandlePacket(buffer, len);
+	// 패킷세션레프로 자신이 누군지 건네준 후 인자로 넘겨주기
+	PacketSessionRef session = PacketSessionRef();
+
+	// header한번 더 체크, 여러 서버가 있을 수 있으니까 대역대체크 후 분리해줘야
+	// DB, 게임서버에서 둘만 사용할 거라고 패킷설계를해놨는데 나중에 클라해킹해서 그 서버쪾으로
+	// 건네주게되면 그런 부분도 거를 수 있어야 함, 정말로 클라랑 관련된 부분만 실행해주도록
+	PacketHeader* header = reinterpret_cast<PacketHeader*>(buffer);
+
+	// TODO : PacketId 대역 체크
+	ServerPacketHandler::HandlePacket(session, buffer, len);
 }
 
 void GameSession::OnSend(int32 len)
