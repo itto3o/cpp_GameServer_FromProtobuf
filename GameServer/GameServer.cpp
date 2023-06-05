@@ -5,13 +5,13 @@
 #include "GameSession.h"
 #include "GameSessionManager.h"
 #include "BufferWriter.h"
-#include "ServerPacketHandler.h"
+#include "ClientPacketHandler.h"
 #include <tchar.h>
 #include "Protocol.pb.h"
 
 int main()
 {
-	ServerPacketHandler::Init();
+	ClientPacketHandler::Init();
 
 	ServerServiceRef service = MakeShared<ServerService>(
 		NetAddress(L"127.0.0.1", 7777),
@@ -54,7 +54,7 @@ int main()
 			data->add_victims(2000);
 		}
 
-		SendBufferRef sendBuffer = ServerPacketHandler::MakeSendBuffer(pkt);
+		SendBufferRef sendBuffer = ClientPacketHandler::MakeSendBuffer(pkt);
 		GSessionManager.Broadcast(sendBuffer);
 
 		this_thread::sleep_for(250ms);
@@ -64,7 +64,7 @@ int main()
 }
 
 // 패킷 자동화 #1
-/* 2023-06-04 */
+/* 2023-06-04
 // 콘텐츠를 만들자니 아직까진 반복적이고 귀찮은 작업이 많음,
 // --> 컨텐츠 단에서는 편하고 실수없이 할 수 있도록 작업
 // 
@@ -135,4 +135,73 @@ int main()
 // 
 // 엥 나 근데 왜 커밋했는데 contribution에 안뜸?
 // email이 다른 것 같아서 같은 이메일로 보내보겠다..
-//
+// 오 됐다 email때문이었구나 휴
+*/
+
+// 패킷 자동화 #2
+/* 2023-06-05 */
+// 지난번에 만들었던 코드를 자동화 시키기
+// 자동화된 코드로 파일이 자동으로 만들어졌으면 좋겠다.!
+// 
+// 자동화해야할 부분?
+// enum 안쪽, Handle_S_TEST 선언, Init안의 아래 부분, 버전으로 오버로딩하는 작업
+// 서버끼리 주고받는 패킷도 ServerPacketHandler라고 하면 헷갈릴 여지가 있으니까
+// 누가 나한테 보냈는지를 기준으로 짓기, 클라이언트에서 나한테 보낸다면 그냥 클라핸들러로
+// ==> 이름을 뒤집기, 나중에 DBPacketHandler 이런식으로 가능하니까
+// 
+// 툴은 C#이나 C++로 만들경우도 있는데, 회사에선 가장 많이 python을 사용
+// 1. 추가>새솔루션폴더>Tools, Server폴더 안에 Tools 폴더 만들기
+// 
+// 파이썬 설치 필요, visual studio installer 실행, python 개발 선택 후 수정,
+// tools>추가>새프로젝트>python 어플리케이션
+// 
+// python 환경변수 추가,
+// jinja, pyinstaller 다운받기
+// python3.9 우클릭>패키지관리> jinja2, pyinstaller 설치(exe파일을 만들때 도움을 주는 애들)
+// 
+// Packethandler까지 만들었으면 얘를 매번 실행하는 것도 귀찮으니까
+// exe파일로 만들기, pyinstaller 활용,
+// PacketGenerator 폴더에서 MakeExe.bat 파일을 만들기
+// --onefile (하나의 파일로 묶어달라) , PacketGanerator.py파일과 ProtoParser.py가 두개라
+// bat 파일을 실행하면 dist안에 exe파일이 생김,
+// window depender가 악성코드로 인식할 때는 삭제하지 않도록 설정
+// build, templates 폴더들을 삭제하기 위해 bat파일에 추가
+// GenPackets.exe를 실행하면 testPacketHandler.h 가 만들어짐
+// 
+// PacketGenerator.py 실행이 안돼서 왜 안되나 했는데 packetHandler.h에서 주석에 쓴 {{조차 인식해서
+// 오류라고 뜨는거였네..
+// 
+// 
+// 매번 눌러주기는 또 귀찮으니까
+// 외부에서 관리하던걸 옮겨주기
+// MakeExe.bat을 만들어서 실행,
+// 
+// GenPackets.exe와 templates폴더를 복사해서 Server의 Common>Protobuf>bin 안에 붙여넣기
+// GenPackets.bat도 수정
+// GenPackets.exe --path 인자 넣어주고, --output, --recv 다 인자로 넣어주기
+// 똑같은 방법으로 Server도 만드는데 recv, send 뒤집어주기
+// 
+// GetPackets.bat을 실행한 후에 Templates/PacketHandler.h 도 날라가고 있어서
+// DEL 옆의 /S를 모두 삭제하기(S는 재귀적으로 안에까지 들어가라는 의미)
+// 
+// 추가적으로 Protocol.proto에 예를들어, C_MOVE를 설계한다고하면
+// 저장한 후 gameserver를 빌드하면 자동으로 만들어질텐데,
+// 이때 뜨는 오류는 새로 만들어진 함수 구현이 없다는 거니까
+// Handle_C_MOVE 함수를 만들어서 콘텐츠 구현을 하면 됨
+// (난 왜 안되냐)
+// 1. protocol에 C_move 멤버가 없다는 오류가 뜨고
+// 2. PKT_S_TEST 재정의 : 이전 정의는 열거자 입니다 오류가 떠
+// 
+// 아무튼 됐다고 하면 더미클라의 OnConnected에서 C_MOVE 패킷을 만들고 sendBuffer로 보낼 수 있음
+// 
+// 시작을 dummy, gameserver둘다 킨다고 하고 실행하면 크래시가 날텐데
+// 1. GameSession.cpp의 session = GetPacketSessionRef()인데 PacketSessionRef()여서 null crash가 남
+// 2. ServerPacketHandler.h의 Init을 어딘가에서 한번 호출해야 할텐데 그걸 DummyClient에서도 해줘야함
+// 
+// 나왜근데 더미클라는 빌드 되는데 서버는 빌드가 안되지
+// 진짜 뭐지..? 심지어 serverPackethandler랑 ClientPacketHandler랑 선생님꺼랑도 똑같은데 왜안되지..?
+// 뭐지 더미클라 pb.h랑 pb.cc는 왜 또 난리지
+// 이번엔 또 재정의 오류만 뜨네 진짜뭐지
+// 
+// 진짜 뭔데.................?
+// 
