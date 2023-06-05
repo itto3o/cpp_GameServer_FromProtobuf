@@ -62,3 +62,5 @@ int main()
 
 	GThreadManager->Join();
 }
+
+// 인생이.. 힘드네요..
