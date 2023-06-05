@@ -33,7 +33,7 @@ bool Handle_S_TEST(PacketSessionRef& session, Protocol::S_TEST& pkt)
 
 	//ASSERT_CRASH(pkt.ParseFromArray(buffer + sizeof(PacketHeader), len - sizeof(PacketHeader)));
 
-	cout << pkt.id() << " " << pkt.hp() << " " << pkt.attack() << endl;
+	cout << pkt.id() << " " << pkt.hp() << " " << pkt.attack() << endl; //<<여기 들어오지도않는데?
 
 	cout << "BUFSIZE : " << pkt.buffs_size() << endl;
 
