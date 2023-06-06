@@ -32,33 +32,33 @@ int main()
 			});
 	}	
 
-	WCHAR sendData3[1000] = L"가"; // UTF16 = Unicode (한글/로마 2바이트)
+	//WCHAR sendData3[1000] = L"가"; // UTF16 = Unicode (한글/로마 2바이트)
 
-	while (true)
-	{
-		Protocol::S_TEST pkt;
-		pkt.set_id(1000);
-		pkt.set_hp(100);
-		pkt.set_attack(10);
-		{
-			Protocol::BuffData* data = pkt.add_buffs();
-			data->set_buffid(100);
-			data->set_remaintime(1.2f);
-			data->add_victims(4000);
-		}
-		{
-			Protocol::BuffData* data = pkt.add_buffs();
-			data->set_buffid(200);
-			data->set_remaintime(2.5f);
-			data->add_victims(1000);
-			data->add_victims(2000);
-		}
-
-		SendBufferRef sendBuffer = ClientPacketHandler::MakeSendBuffer(pkt);
-		GSessionManager.Broadcast(sendBuffer);
-
-		this_thread::sleep_for(250ms);
-	}
+	//while (true)
+	//{
+	//	Protocol::S_TEST pkt;
+	//	pkt.set_id(1000);
+	//	pkt.set_hp(100);
+	//	pkt.set_attack(10);
+	//	{
+	//		Protocol::BuffData* data = pkt.add_buffs();
+	//		data->set_buffid(100);
+	//		data->set_remaintime(1.2f);
+	//		data->add_victims(4000);
+	//	}
+	//	{
+	//		Protocol::BuffData* data = pkt.add_buffs();
+	//		data->set_buffid(200);
+	//		data->set_remaintime(2.5f);
+	//		data->add_victims(1000);
+	//		data->add_victims(2000);
+	//	}
+	//
+	//	SendBufferRef sendBuffer = ClientPacketHandler::MakeSendBuffer(pkt);
+	//	GSessionManager.Broadcast(sendBuffer);
+	//
+	//	this_thread::sleep_for(250ms);
+	//}
 
 	GThreadManager->Join();
 }
@@ -139,7 +139,7 @@ int main()
 */
 
 // 패킷 자동화 #2
-/* 2023-06-05 */
+/* 2023-06-05
 // 지난번에 만들었던 코드를 자동화 시키기
 // 자동화된 코드로 파일이 자동으로 만들어졌으면 좋겠다.!
 // 
@@ -218,4 +218,40 @@ int main()
 // 
 // PacketHandler.h 자동화 부분에 ㅠ%} 라고 된 곳이 있어서 코드가 안만들어지고 있었다
 // 수정 후 출력까지 됨!
+*/
+
+// 채팅 실습
+/* 2023-06-06 */
+// JobQueue, 진지한 큰 MMO를 만들땐 여기까지는 좀 아쉬움,
+// 채팅(그룹방)과 MMO는 종인 한 장 차이,
+// 
+// ServerCore에서 설정>출력디렉터리에서 Libs\ServerCore 추가
+// 
+// Proto파일에 message에 string이 들어가게 될텐데, protobuf에서 string은 utf-8만 넣어줄 수 있음
+// utf-16이면 일반적인 바이트 배열로 한 뒤 wstring으로 다시 변환해줘야
+// 
+// 지금 상황에서 string을 그냥넣으면 에러가 나는데,
+// protobuf에서 링크에러라는 애가 남
+// 특정 버전 protobuf문제라고 함, cmake를 이용해서 protobuf 라이브러리를 만들때
+// 원랜 두 옵션을 체크한 후에 만들었는데 모든 걸 다 끈 다음에 다시 만들면 된다고 함
+// 나.. 포맷당해서 cmake도 없는데 ㅋㅎ;;
+// 그냥 선생님꺼 복붙해야겟다..
+// 
+// 그리고 이렇게 하면 dll을 요구를 안해서 더이상 필요가 없음, 지워주기
+// 
+// GameContents 폴더를 만들어서 Room, Player class 만들어주기
+// 
+// 이제부터도 클라를 쪼개서 서버로 붙이는 연습을 해도 됨
+// 
+// 지금 만드는 방식의 문제?
+// 만약 더미클라가 숫자가 더 늘어나고 게임도 점점 복잡해진다고 하면
+// room 안에 몬스터도있고 인공지능, 미사일 원격 투사체 등이 있을텐ㄴ데 걔ㅔ도 실행이 되어야함
+// 매번 Broadcast에서 lock을 모두 잡고 있음,
+// 경합이 일어나는 부분마다 lock을 잡으면되지않을까 하지만
+// 크래시는 나지 않음, 하지만 클라가 보내는 모든 패킷들이 같은 room에서 이뤄진다고 하면
+// 모든 room에 있는 요소들에 send작업을 하고 있는데 그 send작업도 굉장히 무거운 작업
+// ==> 함수자체가오래걸림, 멀티스레드가 lock을 기다리는 동안 아무것도못함
+// ==> jobQueue 활용
+//
+// C#, C++ 연동이람ㄴ struct player의 패딩 문제 등이 있음 ==> pragma pack() 이용
 // 
