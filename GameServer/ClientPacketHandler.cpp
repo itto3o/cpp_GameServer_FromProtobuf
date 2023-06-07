@@ -112,7 +112,12 @@ bool Handle_C_ENTER_GAME(PacketSessionRef& session, Protocol::C_ENTER_GAME& pkt)
 	// login패킷을 조작해서 언제어디서든 올 수 있다고 생각해서 validation을 체크해야함
 	// (로비에서만 login할 수 있다던지)
 	PlayerRef player = gameSession->_players[index]; // READ_ONLY?
-	GRoom.Enter(player);
+	//GRoom.Enter(player);
+	// job을 만들어서 호출해줘야함
+	GRoom.PushJob(MakeShared<EnterJob>(GRoom, player)); // 일감만 예약
+	// ==> 실행은 안 된 상태라 밑에서 pkt를 만드는게 좀 이상해 보임
+	// ==> 밑의 부분을 Enter가 실행된 후에 만들어지도록 옮겨주거나 바꿔줘야
+	// 핵심은 아니라 넘어가기
 
 	Protocol::S_ENTER_GAME enterGamePkt;
 	enterGamePkt.set_success(true);
@@ -130,7 +135,8 @@ bool Handle_C_CHAT(PacketSessionRef& session, Protocol::C_CHAT& pkt)
 	chatPkt.set_msg(pkt.msg());
 	auto sendBuffer = ClientPacketHandler::MakeSendBuffer(chatPkt);
 
-	GRoom.Broadcast(sendBuffer); // 내부적으로는WRITE_LOCK을 잡고 있음,
+	//GRoom.Broadcast(sendBuffer); // 내부적으로는WRITE_LOCK을 잡고 있음,
+	GRoom.PushJob(MakeShared<BroadcastJob>(GRoom, sendBuffer));
 
 	return true;
 }

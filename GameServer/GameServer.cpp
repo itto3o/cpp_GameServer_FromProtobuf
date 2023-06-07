@@ -1,4 +1,5 @@
-﻿#include "pch.h"
+﻿/*
+#include "pch.h"
 #include "ThreadManager.h"
 #include "Service.h"
 #include "Session.h"
@@ -62,6 +63,7 @@ int main()
 
 	GThreadManager->Join();
 }
+*/
 
 // 패킷 자동화 #1
 /* 2023-06-04
@@ -221,7 +223,7 @@ int main()
 */
 
 // 채팅 실습
-/* 2023-06-06 */
+/* 2023-06-06
 // JobQueue, 진지한 큰 MMO를 만들땐 여기까지는 좀 아쉬움,
 // 채팅(그룹방)과 MMO는 종인 한 장 차이,
 // 
@@ -254,4 +256,94 @@ int main()
 // ==> jobQueue 활용
 //
 // C#, C++ 연동이람ㄴ struct player의 패딩 문제 등이 있음 ==> pragma pack() 이용
+*/
+
+//JobQueue #1
+/* 2023-06-07 */
+// command 패턴에 대해 알아보기(정말 중요!)
+// 디자인 패턴 중 하나
+// 지금은 식당에서 주문->주문받은 사람(session)이 요리->
+// --> 수가 늘어나서 경합이 일어난다면, 계속 기다려야함 주방에서
+// ==> 주방장이 따로, 서빙직원 따로(손님이 요청한 사항을 모두 주문서에 적어서 주방장에게 건네줌)
+// 서로 영역이 분리, 주문서 만드는 시점, 요리를 하는 시점도 분리
+// 주문이 밀린다면 순차적으로 할 것
+// 요리가 들어가지 않은 상황이라면 주문도 취소할 수 있음
+// ==> command패턴은 요청을 캡슐화해서 주문서로(클래스로, 객체로)만드는 것이 중요
+// --> lock을 잡고 경합을 할 필요 없이 순차적으로 담당해서 자기 할 일을 할 수 있음
+// 
+// Job은 무엇인가? , GameContents 아래에 Job클래스 만들기
+// 더미클라는 당장은 필요없어서 GameServer만 시작프로젝트로 설정
+// 
+
+#include "pch.h"
+#include "ThreadManager.h"
+#include "Service.h"
+#include "Session.h"
+#include "GameSession.h"
+#include "GameSessionManager.h"
+#include "BufferWriter.h"
+#include "ClientPacketHandler.h"
+#include <tchar.h>
+#include "Protocol.pb.h"
+#include "Job.h"
+#include "Room.h"
+
+int main()
+{
+	// TEST JOB
+	{
+		// [일감 의뢰 내용] : 1번 유저한테 10만큼 힐을 줘라!
+		// 행동 : Heal
+		// 인자 : 1번 유저, 10이라는 힐량
+		// 바로 요청을 받자마자 실시간 호출이 x
+		// 가장 원시적인 방법
+		HealJob healJob;
+		healJob._target = 1;
+		healJob._healValue = 10;
+		// 동적할당으로 스마트포인터로 넘겨주는게 좋음
+
+		// 나~중에
+		// Execute실행
+		healJob.Execute();
+
+		// ==> 일감을 늘릴때마다 클래스를 늘려줘야함
+		// template으로 발전시키기 보다는
+		// 원시적인 방법으로 채팅 프로그램을 수정해보기
+		// 
+
+	}
+	// JOB
+	ClientPacketHandler::Init();
+
+	ServerServiceRef service = MakeShared<ServerService>(
+		NetAddress(L"127.0.0.1", 7777),
+		MakeShared<IocpCore>(),
+		MakeShared<GameSession>, // TODO : SessionManager 등
+		100);
+
+	ASSERT_CRASH(service->Start());
+
+	for (int32 i = 0; i < 5; i++)
+	{
+		GThreadManager->Launch([=]()
+			{
+				while (true)
+				{
+					service->GetIocpCore()->Dispatch();
+				}
+			});
+	}
+
+	while (true)
+	{
+		// 얘(FlushJob)도 잘못해서 여러 스레드들이 동시에 실행하고 있다면 똑같은 문제가 일어날 것
+		// 무조건 한명만 담당하게 해야함 (지금은 메인스레드)
+		GRoom.FlushJob();
+		this_thread::sleep_for(1ms);
+	}
+
+	GThreadManager->Join();
+}
+// 일감을 푸쉬한 순서대로 꺼내쓰는 것이 특징
+// 컨텐츠 코드를 만드는게 두 세배가 됨, 함수를 만들때마다 클래스를 만들어야 하는 상황
 // 
