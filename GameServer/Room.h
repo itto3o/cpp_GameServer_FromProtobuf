@@ -3,12 +3,12 @@
 
 class Room
 {
-	friend class EnterJob;
-	friend class LeaveJob;
-	friend class BroadcastJob;
+	//friend class EnterJob;
+	//friend class LeaveJob;
+	//friend class BroadcastJob;
 	// 채팅방을 얘기함
 
-private:
+public:
 	// 싱글 쓰레드 환경인 마냥 코딩
 	void Enter(PlayerRef player);
 	void Leave(PlayerRef player);
@@ -16,10 +16,21 @@ private:
 
 public:
 	// 멀티스레드와 관련된 애들, 일감으로 접근
-	void PushJob(JobRef job) { _jobs.Push(job); }
+	//void PushJob(JobRef job) { _jobs.Push(job); }
 	void FlushJob(); // 누군가는 일감을 실행, 오늘은 간단하게 main스레드가 담당
 	// 일감을 밀어넣음과 동시에 아무도 실행하고 있지 않으면 걔가 실행하거나
 	// 아니면 분리해서 push하는 애 따로, 실행하는 애 따로
+
+	// 이제 pushjob을 할때 어떤 함수를 사용할지 지정해주면 되는데
+	// 좀 더 쉽게 하기 위해 헬퍼함수 만들어주기
+	// 멤버함수가 아닌 일반 함수에 대해서도 만들어줄 수 있지만 굳이 하지 않겠다!
+	template<typename T, typename Ret, typename... Args>
+	void PushJob(Ret(T::* memFunc)(Args...), Args... args) // memFunc는 함수 이름
+	{
+		// 잡만들어주기, 생성자에서는 자기 자신을 넘겨주고
+		auto job = MakeShared<MemberJob<T, Ret, Args...>>(static_cast<T*>(this), memFunc, args...);
+		_jobs.Push(job);
+	}
 
 private:
 //	USE_LOCK;
@@ -38,53 +49,53 @@ private:
 extern Room GRoom;
 
 // Room Job
-class EnterJob : public IJob
-{
-public:
-	EnterJob(Room& room, PlayerRef player) : _room(room), _player(player)
-	{
-	}
-
-	virtual void Execute() override
-	{
-		_room.Enter(_player);
-	}
-
-public:
-	Room& _room;
-	PlayerRef _player;
-};
-
-class LeaveJob : public IJob
-{
-public:
-	LeaveJob(Room& room, PlayerRef player) : _room(room), _player(player)
-	{
-	}
-
-	virtual void Execute() override
-	{
-		_room.Leave(_player);
-	}
-
-public:
-	Room& _room;
-	PlayerRef _player;
-};
-
-class BroadcastJob : public IJob
-{
-public:
-	BroadcastJob(Room& room, SendBufferRef sendBuffer) : _room(room), _sendBuffer(sendBuffer)
-	{
-	}
-
-	virtual void Execute() override
-	{
-		_room.Broadcast(_sendBuffer);
-	}
-
-public:
-	Room& _room;
-	SendBufferRef _sendBuffer;
-};
+//class EnterJob : public IJob
+//{
+//public:
+//	EnterJob(Room& room, PlayerRef player) : _room(room), _player(player)
+//	{
+//	}
+//
+//	virtual void Execute() override
+//	{
+//		_room.Enter(_player);
+//	}
+//
+//public:
+//	Room& _room;
+//	PlayerRef _player;
+//};
+//
+//class LeaveJob : public IJob
+//{
+//public:
+//	LeaveJob(Room& room, PlayerRef player) : _room(room), _player(player)
+//	{
+//	}
+//
+//	virtual void Execute() override
+//	{
+//		_room.Leave(_player);
+//	}
+//
+//public:
+//	Room& _room;
+//	PlayerRef _player;
+//};
+//
+//class BroadcastJob : public IJob
+//{
+//public:
+//	BroadcastJob(Room& room, SendBufferRef sendBuffer) : _room(room), _sendBuffer(sendBuffer)
+//	{
+//	}
+//
+//	virtual void Execute() override
+//	{
+//		_room.Broadcast(_sendBuffer);
+//	}
+//
+//public:
+//	Room& _room;
+//	SendBufferRef _sendBuffer;
+//};

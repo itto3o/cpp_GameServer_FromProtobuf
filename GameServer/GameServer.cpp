@@ -259,7 +259,7 @@ int main()
 */
 
 //JobQueue #1
-/* 2023-06-07 */
+/* 2023-06-07
 // command 패턴에 대해 알아보기(정말 중요!)
 // 디자인 패턴 중 하나
 // 지금은 식당에서 주문->주문받은 사람(session)이 요리->
@@ -346,4 +346,104 @@ int main()
 }
 // 일감을 푸쉬한 순서대로 꺼내쓰는 것이 특징
 // 컨텐츠 코드를 만드는게 두 세배가 됨, 함수를 만들때마다 클래스를 만들어야 하는 상황
-// 
+*/
+
+// JobQueue #2
+/* 2023-06-08 */
+// Job.h를 수정해서 공용클래스로 만들어서 관리
+// 표준 STL func, lamda를 활용하면 되는데
+// 이번시간에서 할 건 아니고, 어떤 원리가 있고 어떤 장단점이 있는지 파악
+// Job.h에서 추가로 만들 예정
+// HealJob은 노필요
+//
+#include "pch.h"
+#include "ThreadManager.h"
+#include "Service.h"
+#include "Session.h"
+#include "GameSession.h"
+#include "GameSessionManager.h"
+#include "BufferWriter.h"
+#include "ClientPacketHandler.h"
+#include <tchar.h>
+#include "Protocol.pb.h"
+#include "Job.h"
+#include "Room.h"
+
+// 얘를 job으로 만들어야 함
+void HealByValue(int64 target, int32 value)
+{
+	cout << target << "한테 힐 " << value << "만큼 줌" << endl;
+}
+
+class Knight
+{
+public:
+	void HealMe(int32 value)
+	{
+		cout << "Heal Me!" << value << endl;
+	}
+};
+
+
+int main()
+{
+	{
+		FuncJob<void, int64, int32> job(HealByValue, 100, 10);
+		job.Execute();
+		// job을 만들어줄때 인자들도 같이 기억해서 같이 넘겨줘야
+		// 나중에 인자들이 뭐였는지 잘 모를 수 있음
+		// ==> 클래스 내부에 Args... args; 멤버변수로 만들진 못하지만 tuple로 가능
+		// apply로 하면 호출할땐 인자없이, 대신 생성자에서 인자를 넘겨주기
+		// 
+		//HealJob healJob;
+		//healJob._target = 1;
+		//healJob._healValue = 10;
+
+		//healJob.Execute();
+
+	}
+
+	{
+		Knight k1;
+		// knight의 함수에 funcJob을 호출하고 싶을 때
+		// funcJob을 하나 더만들어주기, MemberJob(멤버함수를 호출해주는 job)
+		MemberJob job2(&k1, &Knight::HealMe, 10);
+		job2.Execute();
+	}
+
+	ClientPacketHandler::Init();
+
+	ServerServiceRef service = MakeShared<ServerService>(
+		NetAddress(L"127.0.0.1", 7777),
+		MakeShared<IocpCore>(),
+		MakeShared<GameSession>, // TODO : SessionManager 등
+		100);
+
+	ASSERT_CRASH(service->Start());
+
+	for (int32 i = 0; i < 5; i++)
+	{
+		GThreadManager->Launch([=]()
+			{
+				while (true)
+				{
+					service->GetIocpCore()->Dispatch();
+				}
+			});
+	}
+
+	while (true)
+	{
+		GRoom.FlushJob();
+		this_thread::sleep_for(1ms);
+	}
+
+	GThreadManager->Join();
+}
+
+// 매번 job 클래스를만들고 있던걸 날리고
+// 일반적으로 코딩하는 것과 마찬가지로 함수단위로 만들어준후,
+// 그 함수를 호출할 때 바로 호출하는게 아니라 pushJob을 해서 해당 함수를 간접적으로 호출
+// ==> 내부적으로 job으로 만들어져서 jobQueue로 만들어지고, 누군가가 Flush를 해서 실행해줌
+// ==> 작업할때 job을 매번 만들ㅇ지 않고도 함수호출하듯 만들 수 있음
+// 다음시간엔 람다캡쳐로, 람다캡쳐도 멤버변수로 모두 인자를 들고있기 때문에 다를건없음
