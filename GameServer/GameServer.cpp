@@ -349,13 +349,12 @@ int main()
 */
 
 // JobQueue #2
-/* 2023-06-08 */
+/* 2023-06-08
 // Job.h를 수정해서 공용클래스로 만들어서 관리
 // 표준 STL func, lamda를 활용하면 되는데
 // 이번시간에서 할 건 아니고, 어떤 원리가 있고 어떤 장단점이 있는지 파악
 // Job.h에서 추가로 만들 예정
 // HealJob은 노필요
-//
 #include "pch.h"
 #include "ThreadManager.h"
 #include "Service.h"
@@ -447,3 +446,174 @@ int main()
 // ==> 내부적으로 job으로 만들어져서 jobQueue로 만들어지고, 누군가가 Flush를 해서 실행해줌
 // ==> 작업할때 job을 매번 만들ㅇ지 않고도 함수호출하듯 만들 수 있음
 // 다음시간엔 람다캡쳐로, 람다캡쳐도 멤버변수로 모두 인자를 들고있기 때문에 다를건없음
+*/
+
+// JobQueue#3
+/* 2023-06-09 */
+// 최종적으로 작업할 코드는 ServerCore에 새필터를 만들어서 Job class를 만들어주기
+// JobQueue는 작성했던 그대로 사용, JobRef는 types.h에 using 달아주기
+// gameserver에 있던 job 클래스들은 다 날리기
+// 아까운데...... 그래도 깃헙에는 남아있겠지..?
+//
+// job을 묶어서 인자들일아 같이 들고있는건 통과를 햇는데
+// push, pop을 할때 어떻게 할것인가?
+// 지금은 일감을 넣어주는 애 따로, flush해주는 애 따로 있음
+// 지금은 간단히 room을 하나만 만들어서 mainthread가 체크해주고 있지만
+// 나중에가면 room이 어마어마하게 많아짐, 정책에 따라 jobQueue를 룸단위로 배치하는게 아니라
+// 객체마다 배치하는 경우가 있음, ==> main스레드가 뺑뺑이 돌면서 flush하는건 좀 그럼
+// 스레드끼리 각각 분배해서 일처리가 애매해짐
+// ==> 다음시간에 알아보기, 일감 관리
+
+#include "pch.h"
+#include "ThreadManager.h"
+#include "Service.h"
+#include "Session.h"
+#include "GameSession.h"
+#include "GameSessionManager.h"
+#include "BufferWriter.h"
+#include "ClientPacketHandler.h"
+#include <tchar.h>
+#include "Protocol.pb.h"
+#include "Job.h"
+#include "Room.h"
+#include "Player.h"
+
+//void HealByValue(int64 target, int32 value)
+//{
+//	cout << target << "한테 힐 " << value << "만큼 줌" << endl;
+//}
+
+class Knight : public enable_shared_from_this<Knight>
+{
+public:
+	void HealMe(int32 value)
+	{
+		cout << "Heal Me!" << value << endl;
+	}
+
+	void Test()
+	{
+		// -hp는 포인터값이 아니고 정수니까 아무런 문젝 ㅏ없다고 지나칠 수 있음
+		auto job = [self = shared_from_this()]()//[this]()// [=]()이렇게 하는건 매우위험함, 하나하나 지정하는 습관이 좋음
+		{
+			self->HealMe(self->_hp); // _hp를 복사하는ㄱ ㅔ아니라 사실 this->_hp가 생략이 되어있기 때문에
+			// 위에 [=]이 아닌 [this]를 해주고 있었다, 하지만 Knight가 유효해야 this도 유효하기 때문에
+			// 만약 Knight가 소멸이됐다면 this가 오염됨
+			// 그리고 Knight가 shared_ptr를 사용하고 있었다고 하면 this포인터를 섞어서 쓰면 안됨
+			// refCount에 아무런 도움이 되지않기 때문에
+			// ==> shared_ptr를 사용하기ㅗㄹ했으면 enable_shared_from_this를 상속받아서 
+			// this가 아니라 shared_from_this()를 호출해서 그걸 self로 복사한 다음에
+			// this를 self->로 바꿔줌 ==> refCount +1이 됨
+		};
+	}
+private:
+	int32 _hp = 100;
+};
+
+//#include <functional>
+// ==> std::function을 사용, 온갖 형식의 함수들을 받아줄 ㅅ ㅜ있음
+// std::function<void(void)> 는 return void, 인자들은x
+
+//void HelloWorld(int32 a, int32 b)
+//{
+//	std::cout << "hello world" << std::endl;
+//}
+
+int main()
+{
+	//PlayerRef player = make_shared<Player>();
+
+	//// 이렇게 일반적으로 인수를 호출할때 넣어줄 수 있지만
+	//// 함수 포인터로 저장하고 있으면 1, 2 값을 따로 저장할 곳이 없었기 때문에
+	//// 함수자를 만들때 tuple에 저장하고 호출할땐 그걸 복원
+	//// ==> 람다에서는 아무런 위화감 없이 밑의 코드가 정상적으로  실행이됨
+	//HelloWorld(1, 2);
+
+	//
+	//							// 람다 캡쳐도 있음 [=] 기능 : functor와 느낌이 비슷함
+	////std::function<void()> func = [&player]()//[=]() //[]()로 하면 에러가 남, =은 모든 것을 복사, &은 모든 것을 참조값으로 다 전달
+	//							// 그냥 player를 넣으면 player를 지정해서 복사해서 전달, &player도 가능
+	//std::function<void()> func = [self = GRoom, &player]() //GRoom을 복사해서 refCount를 유지
+	//{
+	//	// 우리가 원하는 행동 넣기
+	//	//std::cout << "hello world" << std::endl;
+	//	HelloWorld(1, 2); // 이런 인자가 익명 함수 내에 같이 전달해서 저장하는 것과 마찬가지로 실행이 다 됨
+	//	//GRoom.Enter(player);
+	//	self->Enter(player); //shared_ptr을 사용할경우
+	//};
+	//// 복사해서 안에 넣을때 캡처 모드를 지정해야함
+
+	////TODO
+
+	//// 나중에 func()로 호출해서 실행이 됨
+	//func();
+
+	// 보통 이런 걸 closure라고 함
+	// 컴파일러가 내부적으로 클래스를 만들어주는데 1, 2 를 넣어준 데이터들도 어딘가에 들고있는 형태로 만들어짐
+	// ==> 캡처 모드에 따라서 PlayerRef player; 이렇게 들고있을 것인가 &를 붙여서 들고있을 것인가
+	// Job도 std::function 자체를 job으로 여기기만 하면 나머지 문제들이 해결이 됨
+	// 
+	// C++과 람다의 안맞는 점은 만들자마자 바로 호출하면 상관이 없는데
+	// job을 만든 후에 jobQueue에 넣고 누군가 한참후에 그걸 실행
+	// ==> 캡처할 당시 넣어줬던 인자들이 유지가 되어야 한참 뒤에 실행할 수 있음
+	// 예를들면 캡처해서 &player로 넘겼다고 가정하면, PlayerRef& 형식으로 들고 있따는 이야기고,
+	// 이는 shared_ptr을 참조값으로 들고 있는 것이고, 따라서 refCount가 1증가하지 않게 된다
+	// ==> refCount가 0이되어 삭제될 수도 있다.
+	// 반드시 캡처할 경우, 객체의 생명 주기가 job이 유지가 될때까지는 살아있어야 한다는 보장을 해줘야함
+	// 네트워크 코드를 만들 때 세션쪽에서 send, Recv를 걸어줄때 세션이 살아있어야 했떤 것과 마찬가지
+	//
+	// 주의사항 또 있음
+	// Knight클래스 안에 Test90 함수가 있는데 내부에서 잡을 만들어서 전달한다고 하면
+	// Knight 안에 _hp가 100, HealMe 함수가 있는데 인자로 value를 받아서 로그를 찍는 함수가 있다고 하면
+	// Knight가 실행되는 도중에 job을 만드는 함수에서 HealMe(_hp)를 job에 등록한다ㅗㄱ 하면
+	// _hp는 포인터형식이아닌 정수니까 문제가 없을 거라 생각하게 됨
+	// 캡처할때 모든 애들을 대상으로 복사하겠다는 굉장히 위험함
+	// 하지만 _hp는엄연히 this->_hp기 때문에 [=]를 하면 [this]를 한것과 동일해지고,
+	// this는 Knight가 살아있어야 유효해지기 때문에 이 코드 또한 Knight의 생명주기에 따라 위험해짐
+	//
+	// C++에서 람다랑 shared_ptr를 쓰면 메모리 릭이 발생한다는 글이 많이 올라오는데
+	// 사실 그건 class 안에서 callback함수를 쓰면서 shared_ptr을 또 들고 있는 상황이 되는데
+	// 그건 사실 사이클이 발생해서 refCount가 0이 되지 않는 상황인거고
+	// 람다랑은 상관이 없음
+	//
+
+	//{
+	//	FuncJob<void, int64, int32> job(HealByValue, 100, 10);
+	//	job.Execute();
+	//}
+
+	//{
+	//	Knight k1;
+	//	MemberJob job2(&k1, &Knight::HealMe, 10);
+	//	job2.Execute();
+	//}
+
+	ClientPacketHandler::Init();
+
+	ServerServiceRef service = MakeShared<ServerService>(
+		NetAddress(L"127.0.0.1", 7777),
+		MakeShared<IocpCore>(),
+		MakeShared<GameSession>, // TODO : SessionManager 등
+		100);
+
+	ASSERT_CRASH(service->Start());
+
+	for (int32 i = 0; i < 5; i++)
+	{
+		GThreadManager->Launch([=]()
+			{
+				while (true)
+				{
+					service->GetIocpCore()->Dispatch();
+				}
+			});
+	}
+
+	while (true)
+	{
+		GRoom->FlushJob();
+		this_thread::sleep_for(1ms);
+	}
+
+	GThreadManager->Join();
+}
