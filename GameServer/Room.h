@@ -1,8 +1,8 @@
 #pragma once
-#include "JobSerializer.h"
+#include "JobQueue.h"
 
 //class Room : public enable_shared_from_this<Room>
-class Room : public JobSerializer
+class Room : public JobQueue
 {
 	//friend class EnterJob;
 	//friend class LeaveJob;
@@ -18,7 +18,7 @@ public:
 public:
 	// 멀티스레드와 관련된 애들, 일감으로 접근
 	//void PushJob(JobRef job) { _jobs.Push(job); }
-	virtual void FlushJob() override; // 누군가는 일감을 실행, 오늘은 간단하게 main스레드가 담당
+	//virtual void FlushJob() override; // 누군가는 일감을 실행, 오늘은 간단하게 main스레드가 담당
 	// 일감을 밀어넣음과 동시에 아무도 실행하고 있지 않으면 걔가 실행하거나
 	// 아니면 분리해서 push하는 애 따로, 실행하는 애 따로
 

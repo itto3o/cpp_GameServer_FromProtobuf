@@ -28,18 +28,19 @@ void Room::Broadcast(SendBufferRef sendBuffer)
 	}
 }
 
-void Room::FlushJob()
-{
-	while (true)
-	{
-		// 일감이 있을 때까지 루프를 돌면서, 없으면 break;
-		// 일감이 있을때마다 호출해줄 것
-		// (일감이 없으면 break되고 return되겠지만 메인 스레드에서도 무한 루프를 걸어놔서
-		// 계속 들어오고 있는 듯
-		JobRef job = _jobQueue.Pop();
-		if (job == nullptr)
-			break;
+//void Room::FlushJob()
+//{
+//	while (true)
+//	{
+//		// 일감이 있을 때까지 루프를 돌면서, 없으면 break;
+//		// 일감이 있을때마다 호출해줄 것
+//		// (일감이 없으면 break되고 return되겠지만 메인 스레드에서도 무한 루프를 걸어놔서
+//		// 계속 들어오고 있는 듯
+//		JobRef job = _jobQueue.Pop();
+//		if (job == nullptr)
+//			break;
+//
+//		job->Execute();
+//	}
+//}
 
-		job->Execute();
-	}
-}

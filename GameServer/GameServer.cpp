@@ -449,7 +449,7 @@ int main()
 */
 
 // JobQueue#3
-/* 2023-06-09 */
+/* 2023-06-09
 // 최종적으로 작업할 코드는 ServerCore에 새필터를 만들어서 Job class를 만들어주기
 // JobQueue는 작성했던 그대로 사용, JobRef는 types.h에 using 달아주기
 // gameserver에 있던 job 클래스들은 다 날리기
@@ -614,6 +614,111 @@ int main()
 		GRoom->FlushJob();
 		this_thread::sleep_for(1ms);
 	}
+
+	GThreadManager->Join();
+}
+*/
+
+// JobQueue #4
+/* 2023-06-11 */
+// shared_ptr을 들고 있으면 생명주기 관리에는 꽤 좋지만
+// 사이클이 일어날 경우 메모리 릭이 발생할 수 있어서 조심해야함
+// job안에 sharedptr을 포함하고 있다보니까 이렇게되면 객체가 소멸하지 않을 것
+// weak ptr을 쓰거나 ClearJobs같은 함수를 만들어서 jobQueue를 싹 밀어주기
+// 
+// job을 넣는 애 따로, 실행하는 애 따로 만들어놨음
+// 메인 스레드가 루프를돌면서 flush중인데,
+// 룸이 한두개면 그렇게해도 되지만, job을 실행하는 애들을 엄청 많이 배치할 수 있음
+// 심하면 액터단위로 다 배치
+// flush단위가 몇천이 될 수 있는데, 누가 이걸 뺑뺑이를 돌면서 실행해야하는지가 난감,
+// 일일이 순회하면서 실행하는 것도 귀찮고, 일감이 없는데도 굳이 매번 루프를 돌면ㅅ ㅓ체크하는중
+// --> 조건변수, condition valiable로 일감이 떨어졌을때만 동작할 수도 있겠지만
+// 객체가 많아지면 조건변수를 배치하는 것도 힘듦
+// push job을 할때 실행까지 담당하게끔 만드는것을 선호
+// Session도 Send를 할때 실행까지 할 것인지, 아님 sendQueue에 넣고 빠져나올지 등등
+// 처음으로 들어온 애가 아직 false라고 하면 얘가 실행까지 담당하게 햇는데
+// 이런 형태로 만들어주면 편리하게 작업할 수 있음
+// 
+// jobQueue는 다른 곳에서도 jobQueue라고 사용할 수 있으니까 이름수정, lockQueue로 만들어서
+// template으로 만들어서 lock을 거는 큐로 공용으로 만들어주기, utils에 넣어주고
+// jobSerializer를 jobQueue로 만들기
+// 
+// 누군가가 따로 챙겨서 실행하는부분이 다 날라감
+// 이 방법이 당연하지만 생각할 부분이 많음
+// 
+// 포트폴리오는 이렇게 만들어도 충분하지만,
+// jobQueue방식으로 실행한다면
+// 1. 일감이 너무 많이 몰리면? 일감이 0으로 떨어지지 않아 return을 못하고 빠져나갈 수 없음
+// 일반적으로 MMO에서는 렉이 걸릴거면 모두에게 렉이 걸려야 공평함
+// --> 한쪽만 몰빵해서 실행한다면 아쉬움, (한 애만 렉이 많이걸리게 됨)
+// 2. DoAsync를 타고가서 절대 끝나지 않는 상황(일감이 한 스레드한테몰리게 됨)
+// execute로 실행을 하면 어떤 이유로 다른 비동기 코드를밀어넣었따고 하면
+// 비동기함수 가 따른 객체도 동일한 스레드가 담당해서 여러명을 담당하게 될 수도
+// 첫번째 스레드가 여유롭게 시작했지만 다른 애의 jobQueue를 모두 건들여서
+// 걔가 모든 경우에서 다 첫번째로 들어오게 되어 모든 비동기 함수를 걔가 실행하게 된다면
+// 결국엔 끝이안나고 계속실행, --> 일감 배분 해줘야
+#include "pch.h"
+#include "ThreadManager.h"
+#include "Service.h"
+#include "Session.h"
+#include "GameSession.h"
+#include "GameSessionManager.h"
+#include "BufferWriter.h"
+#include "ClientPacketHandler.h"
+#include <tchar.h>
+#include "Protocol.pb.h"
+#include "Job.h"
+#include "Room.h"
+#include "Player.h"
+
+class Knight : public enable_shared_from_this<Knight>
+{
+public:
+	void HealMe(int32 value)
+	{
+		cout << "Heal Me!" << value << endl;
+	}
+
+	void Test()
+	{
+		auto job = [self = shared_from_this()]()
+		{
+			self->HealMe(self->_hp); 
+		};
+	}
+private:
+	int32 _hp = 100;
+};
+
+
+int main()
+{
+	ClientPacketHandler::Init();
+
+	ServerServiceRef service = MakeShared<ServerService>(
+		NetAddress(L"127.0.0.1", 7777),
+		MakeShared<IocpCore>(),
+		MakeShared<GameSession>, // TODO : SessionManager 등
+		100);
+
+	ASSERT_CRASH(service->Start());
+
+	for (int32 i = 0; i < 5; i++)
+	{
+		GThreadManager->Launch([=]()
+			{
+				while (true)
+				{
+					service->GetIocpCore()->Dispatch();
+				}
+			});
+	}
+
+	//while (true)
+	//{
+	//	GRoom->FlushJob();
+	//	this_thread::sleep_for(1ms);
+	//}
 
 	GThreadManager->Join();
 }

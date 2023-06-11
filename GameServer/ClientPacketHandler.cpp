@@ -116,7 +116,8 @@ bool Handle_C_ENTER_GAME(PacketSessionRef& session, Protocol::C_ENTER_GAME& pkt)
 	// job을 만들어서 호출해줘야함
 	//GRoom.PushJob(MakeShared<EnterJob>(GRoom, player)); // 일감만 예약
 	//GRoom.PushJob(&Room::Enter, player);
-	GRoom->PushJob(&Room::Enter, player);
+	//GRoom->PushJob(&Room::Enter, player);
+	GRoom->DoAsync(&Room::Enter, player);
 	// ==> 실행은 안 된 상태라 밑에서 pkt를 만드는게 좀 이상해 보임
 	// ==> 밑의 부분을 Enter가 실행된 후에 만들어지도록 옮겨주거나 바꿔줘야
 	// 핵심은 아니라 넘어가기
@@ -140,7 +141,8 @@ bool Handle_C_CHAT(PacketSessionRef& session, Protocol::C_CHAT& pkt)
 	//GRoom.Broadcast(sendBuffer); // 내부적으로는WRITE_LOCK을 잡고 있음,
 	//GRoom.PushJob(MakeShared<BroadcastJob>(GRoom, sendBuffer));
 	//GRoom.PushJob(&Room::Broadcast, sendBuffer);
-	GRoom->PushJob(&Room::Broadcast, sendBuffer);
+	//GRoom->PushJob(&Room::Broadcast, sendBuffer);
+	GRoom->DoAsync(&Room::Broadcast, sendBuffer);
 
 	return true;
 }
