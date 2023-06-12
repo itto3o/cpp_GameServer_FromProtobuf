@@ -43,6 +43,8 @@ public:
 private:
 							// 오른값으로 job을 받아서 바로 move를 해서 밀어넣기
 	void				Push(JobRef&& job);
+
+public:
 	void				Execute();
 
 protected:

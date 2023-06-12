@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "JobQueue.h"
+#include "GlobalQueue.h"
 /*------------------
 	JobQueue
 -------------------*/
@@ -26,13 +27,31 @@ void JobQueue::Push(JobRef&& job)
 	// count가 0이었다고 하면 내가 맨 처음 밀어넣게 되는 거라고 확신할 수 있음
 	if (prevCount == 0)
 	{
-		// 실행 담당
-		Execute();
+		// prevCount가 0이면 항상 실행했지만 이제는 아님
+		// 먼저 조건 체크, 이미 실행중인 jobQUeue가 없으면 실행
+		if (LCurrentJobQueue == nullptr)
+		{
+			// 실행 담당
+			Execute();
+		}
+		else
+		{
+			// 이미 담당하는 애가 있다면 다른 애한테 떠넘김
+			// globalQueue에 등록,
+			// 여유있는 다른 스레드가 실행하도록
+			GGlobalQueue->Push(shared_from_this());
+			// 누군가는 꺼내서 실행을 해야할텐데, 이걸 어떻게 배분해야할까?
+			// --> ThreadManager.h에 가서 DoGlobalQueueWork() 함수 만들기
+			// 이 함수를 누군가 호출해서 실행해야하는데, 이거는 GameServer.cpp에서 살펴봄
+		}
 	}
 }
 
 void JobQueue::Execute()
 {
+	// Execute로 들어왔다는건 내가 얘를 담당하겠다는 거니까 this로 가리킴
+	LCurrentJobQueue = this;
+
 	// 루프를 돌면서 하나씩 실행
 	while (true)
 	{
@@ -48,7 +67,17 @@ void JobQueue::Execute()
 		if (_jobCount.fetch_sub(jobCount) == jobCount) //원래 값이 내가 빼준값이랑 동일하다면
 		{
 			// 남은 일감이 0개라면 종료
+			LCurrentJobQueue = nullptr; //다시 null로 밀어서 호출이 끝남
 			return;
+		}
+
+		// 시간을 체크해서 현재시간이 원래 할당받은 시간보다 더 크다고 하면 그냥 나오기
+		const uint64 now = ::GetTickCount64();
+		if (now >= LEndTickCount)
+		{
+			LCurrentJobQueue = nullptr;
+			GGlobalQueue->Push(shared_from_this());
+			break;
 		}
 	}
 }

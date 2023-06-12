@@ -620,7 +620,7 @@ int main()
 */
 
 // JobQueue #4
-/* 2023-06-11 */
+/* 2023-06-11
 // shared_ptr을 들고 있으면 생명주기 관리에는 꽤 좋지만
 // 사이클이 일어날 경우 메모리 릭이 발생할 수 있어서 조심해야함
 // job안에 sharedptr을 포함하고 있다보니까 이렇게되면 객체가 소멸하지 않을 것
@@ -657,6 +657,10 @@ int main()
 // 첫번째 스레드가 여유롭게 시작했지만 다른 애의 jobQueue를 모두 건들여서
 // 걔가 모든 경우에서 다 첫번째로 들어오게 되어 모든 비동기 함수를 걔가 실행하게 된다면
 // 결국엔 끝이안나고 계속실행, --> 일감 배분 해줘야
+//
+// Q. clear함수를 추가해서 clear를 추가하기 전에도 pop을 하게 되어 job이 실행되고 나면 
+// 동일하게 owner의 refCount가 감소하게되므로 clear가 필요없지 않나요?
+// A. 그건 그렇지만, 특정 시점에 오브젝트를 소멸시켜 더이상 job이 실행되지 않기를 원하는 상황도 있을테니까
 #include "pch.h"
 #include "ThreadManager.h"
 #include "Service.h"
@@ -722,3 +726,178 @@ int main()
 
 	GThreadManager->Join();
 }
+*/
+
+// JobQueue #5
+/* 2023-06-12 */
+// JobQueue에 일감을 밀어넣고, 첫번째로 일감을 밀어넣은 애라면 걔가 flush까지 담당
+// --> 모든 스레드들이 균등하게 일을 나눠주는 걸 바람
+// jobQueue를 호출하고 있는지 아닌지 추적해서, 내가 호출하고 있따고 하면
+// 처음으로 들어왔다고 하더라도 다른애한테 떠넘기게
+// Job에 GlobalQueue 클래스 만들기
+#include "pch.h"
+#include "ThreadManager.h"
+#include "Service.h"
+#include "Session.h"
+#include "GameSession.h"
+#include "GameSessionManager.h"
+#include "BufferWriter.h"
+#include "ClientPacketHandler.h"
+#include <tchar.h>
+#include "Protocol.pb.h"
+#include "Job.h"
+#include "Room.h"
+#include "Player.h"
+
+enum
+{
+	WORKER_TICK = 64
+};
+
+void DoWorkerJob(ServerServiceRef& service)
+{
+	while (true)
+	{
+		// countㅅ 설정, 임의의 값을 넣어줄건데 enum으로 빼주기
+		// enum의 64와 같은 세부적인 인자들은 하드코딩 했는데,
+		// 이런 부분은 그냥 어느정도 체크해서 일감이 제한된 시간에 끝내지 못하는 경우가 많아진다고 하면
+		// WORKER_TICK을 좀 늘리는 식으로 자동 보정이 되게끔 만듦
+		LEndTickCount = ::GetTickCount64() + WORKER_TICK;
+
+		// 지금까지는 워커 스레드들이 iocp를 두리번거리면서 dispatch를 실행하고 있었음
+		// dispatch내부에서는 getQueueCompletionStatus를 하면서 일감이 나오길 기다렸다가
+		// 입출력 통지기ㅏ 완료되면 dispatch를 호출,
+		// 
+		// session의 onRecv를 타고와서 패킷을 조립해서 컨텐츠로 들어가는 상황
+		// (패킷이 아니라면 그냥 Session의 ProcessRecv 호출, 패킷세션이라면 PacketSession::OnRecv
+		// 그 후에 GameSession.h의 OnRecvPacket이 호출(컨텐츠 단)
+		// GPacketHandler를 호출해서 Handle_C_TEST 이런쪽으로 들어가게 됨
+		// 그냥 실행해야하는 일감은 GlobalQueue에 넣음
+		// 
+		// 애초에 시작은 Dispatch, 네트워크 입출력 처리에서 인게임 로직까지 같이 호출하고 있음
+		// (패킷 핸들러에 의해)
+		// dispatch한 다음에 패킷을 파싱해서 room에 job을 넣어주고 그냥 빠져나오는 식으로 구현하는 것도 있음
+		// 네트워크 전달만 담당, 인게임 로직은 따로 만들어서
+		// 스레드가 한두개가 아니라 나중에 10개, 20개 단위일텐데
+		// 걔네들을 어떻게 배치해서 적절히 분배할 것인지
+		// 
+		// 지금 현재 상황(네트워크 입출력에서 인게임 로직까지 모두 호출이 되는 상황)에서 문제점은
+		// dispatch를 기본값으로 무한대로 넣어놨는데(GetQueueCompletionStatus에서)
+		// 네트워크 입출력 함수가 완료되지 않으면ㄴ 빠져나가지 않고 그냥 sleep하게 됨
+		// --> dispatch에 타임아웃을 넣게 되면 무한으로 대기하지 않고 지정한 시간만 기다린 후에
+		// LastError가 WAIT_TIMEOUT으로 떠서 바로 return false;로 완료됨
+		// 
+		// 왜 바로 빠져나오게 하느냐?
+		// 지금은 간단한 채팅만 했으니까,
+		// 패킷을 받아서 처리하는 애 뿐만 아니라 게임 로직을 같이 계속 돌려야하는 애도 있음
+		// (몬스터, 화살, 화염구 같은 투사체들이 날라다닐 경우)
+		// 클라이언트 쪽에서 패킷을 받아서 처리하는게아니라
+		// room의 누군가가 계속 관찰해서 그 로직을 실행시켜야 함
+		// --> 모든 애들을 네트워크 단에서 받은 입출력 처리가 호출하게 만들 순 없음
+		// 누군가는 room jobQueue자체도 관찰해서 호출해줘야함
+		//service->GetIocpCore()->Dispatch();
+		service->GetIocpCore()->Dispatch(10);
+
+		// 글로벌 큐 : 네트워크에서 미처 처리하지 못한 애들을 예약하거나 인게임 로직을 예약하거나
+		ThreadManager::DoGlobalQueueWork();
+		// 만약 얘를 메인스레드가 실행하게 했따고 하면
+		// --> 네트워크와 관련된 스레드들은 위에코드에서 실행해주고,
+		// 메인스레드가 나머지 전역에 예약된 글로벌큐를 호출해주겠다는 의미
+		// 
+		// 얘가 지금처럼 함께 넣어주게 되면
+		// 스레드를 이용할때 진짜 만능형 직원을 채용하는 느낌(네트워크 입출력에서 인게임 로직까지 같이 호출)
+		// 네트워크 통신부하보다 인게임 로직 부하가 더 크다고 하면
+		// 인게임 로직에 스레드를 더 많이 배치해서 빠르게 되도록 해야할 것임
+		// 반대로 네트워크 처리가 안돼서 dispatch하는 부분이 밀린다고 하면 그것대로 문제
+		// --> 모든 스레드들이 만능형으로 변신해서,
+		// dispatch(10)으로 10초동안 기다리다가, 바로 빠져나와서 (시간이 남으면) 글로벌 큐의 일을 처리
+		// doGlobalQueueWork에서는 tick을 계산해서 일정시간동안만 일을 하다가, 다시 나옴
+		// --> 스레드 배치를 어떻게 할 것인가?
+		// 어떤 곳에선 모든애들을 iocpCore를 이용하는 경우도 있음
+		// 우리가 원하면 일반 queue를 사용하듯 강제로 완료통지가 뜨게끔 넣어줄 수도 있음
+		// 일반 컨텐츠 코드도 iocpCore에 넣을 수 있음
+		// --> 모든 일꾼들에게 일감이 균등하게 배분
+	}
+}
+
+class Knight : public enable_shared_from_this<Knight>
+{
+public:
+	void HealMe(int32 value)
+	{
+		cout << "Heal Me!" << value << endl;
+	}
+
+	void Test()
+	{
+		auto job = [self = shared_from_this()]()
+		{
+			self->HealMe(self->_hp);
+		};
+	}
+private:
+	int32 _hp = 100;
+};
+
+
+int main()
+{
+	ClientPacketHandler::Init();
+
+	ServerServiceRef service = MakeShared<ServerService>(
+		NetAddress(L"127.0.0.1", 7777),
+		MakeShared<IocpCore>(),
+		MakeShared<GameSession>, // TODO : SessionManager 등
+		100);
+
+	ASSERT_CRASH(service->Start());
+
+	for (int32 i = 0; i < 5; i++)
+	{
+		GThreadManager->Launch([&service]()//[=]()
+			{
+				while (true)
+				{
+					//service->GetIocpCore()->Dispatch();
+					DoWorkerJob(service);
+				}
+			});
+	}
+
+	// 처음엔 무한루프를 돌면서 DoWorkJob같으걸 해줬는데,
+	// 그렇게 하면 일이 균등하게 분배되지 않을 것임
+	// ==> 일단 위에 함수를 만들기
+	
+	// mainthread는 딱히 할일이 없으니까 얘도 만능형 일꾼이 되도록
+	DoWorkerJob(service);
+
+	// 일감이 균등하게 배분은 됐으나 일감이 너무 몰리면 하나의 스레드에 과부하가 온다는 건 변하지 않음,
+	// --> 어느정도 호출을 하다가 도저히 답이 없다고 하면 적당히 빠져나오도록 수정
+	// JobQueue.cpp에서 무한 루프를 돌면서 남은 일감이 0개면 종료하는 부분에
+	// 하나를 더 체크해서 현재 시간을 체크한 다음
+	// endTickCount보다 더 크다고 하면 원래 할당받은 시간보다 더 소모를 한 셈이니까
+	// globalQueue에 넣고 빠져나오기
+
+	GThreadManager->Join();
+}
+
+// 어 나 빌드하는 과정에서 *.pp.h를 못찾는다는 로그를 봤는데...?
+// protocol.proto를 바꿔서 빌드해보니까 코드가 자동으로 만들어지는 부분은 처리가 되고 있긴한데
+// 그럼 그냥 이미 .h파일이 없어져서(이전에 계속 했었으니까) 그렇게 뜨는 건가
+
+// Q. 스레드들이 DoGlobalQueueWork함수를 이용해서 jobQueue를 처리하고 있는데
+// 이렇게 되면 job을 처리하는 도중에 데이터가 겹쳐서 race condition상황이 발생하는지?
+// A. GGlobalQueue에 들어갔다가 다시 여러 스레드에 배분되어 실행된다면 물론 멀티스레드 이슈가 생길 수도 있음
+// 다만 대부분의 경우 여러 jobQueue 간에 공유하는 데이터는 생각보다 많이 생기지 않음
+// Zone단위로 JobQueue를 배치하는 경우 jobQueue 간 데이터 공유가 거의 없고(하나의 지역에서 모든 일들이 일어나기 때문)
+// Actor 단위로 jobQUeue를 배치하는 경우 필연적으로 아주 잠시 Lock을 걸어서 데이터를 빼오거나
+// 아니면 락을 걸지 않아도 크래시가 나지 않는(ex. 배열)을 사용해서 우회
+//	--> 부가설명,
+// 락을 걸지 않으면 레이스컨디션은 발생하지만, 크게 상관없는 경우도 있음
+// 액터단위로 배치한다 가정할때 실제로 자신의 정보를 건드리는 것은 무조건 해당 액터의 jobQueue에서 일어나기 때문에 문제 없음
+// 하지만 외부의 다른 액터가 해당 정보를 긁어올 필요가 종종 생김
+// Ex. 유저 2명이 서로 전투가 일어났고, 유저 단위로 jobQueue가 걸려잇는 경우,
+// 상대방의 hp가 얼마인지 얻어오고 싶은데, 그렇다고 상대 객체에 lock을 걸고 getHp를 하기엔 아쉬우니
+// 락을 걸지 않고 일단 갖고 옴
+// --> 상대측에서 setHp가 병렬로 실행돈다면 hp가 정말 '현재 최종값'이 맞으리라는 보장은 없지만,
+// 그정도로 정밀하게 타이밍을 맞춰야 할 필요는 없으니 넘어가는 것
