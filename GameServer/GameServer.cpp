@@ -729,7 +729,7 @@ int main()
 */
 
 // JobQueue #5
-/* 2023-06-12 */
+/* 2023-06-12
 // JobQueue에 일감을 밀어넣고, 첫번째로 일감을 밀어넣은 애라면 걔가 flush까지 담당
 // --> 모든 스레드들이 균등하게 일을 나눠주는 걸 바람
 // jobQueue를 호출하고 있는지 아닌지 추적해서, 내가 호출하고 있따고 하면
@@ -901,3 +901,151 @@ int main()
 // 락을 걸지 않고 일단 갖고 옴
 // --> 상대측에서 setHp가 병렬로 실행돈다면 hp가 정말 '현재 최종값'이 맞으리라는 보장은 없지만,
 // 그정도로 정밀하게 타이밍을 맞춰야 할 필요는 없으니 넘어가는 것
+*/
+
+// JobTimer
+/* 2023-06-13 */
+// 지난 시간에 했던 것 수정
+// : shared_ptr를 사용해서 하고 있는데, refCount이 되기 때문에 오염된 메모리를 건드리거나 하는 확률은 줄이지만
+// 메모리 릭이 날 상황이 큼
+// --> 서버를 오랫동안 띄우면 한 2주동안 연속해서 띄우면 한번씩은 내리고 다시 띄웠어야
+// --> GameSession.h에 소멸자 로그를 해놧었는데 언제부턴가 소멸자 로그가 찍히지 않고 있었다..!
+// GameSession에 playerREf를 만들어놨는데, Player.h에서는 GameSessionRef를 들고 있음
+// player도 room안에 넣어놨는데 빠져나오지 못해서 거기서도 사이클
+// --> login을 할 때 players에 연결을 해줬었음
+// player가 선택해서 C_ENTER를 호출하면 어떤 플레이어로 로그인하고 있는지, 어떤 방에 있는지
+// gamesession에서 들고 있다가 나갈때 정리해주는 그런게 필요함
+// ==> GameSession.h에서 PlayerRef로 currentPlayer 추적
+// 
+// breakPoint를 잡지 않고, 더미 클라에서 연결했다 끊었다를 반복해보고 세션을 늘렸다 줄였다 해보면
+// 메모리가 우상향으로 쭉 늘어나면 메모리 릭일 것임
+// 
+// 오늘은 JobQueue.hㅔㅇ 일감을 밀어넣는 작업까진 했는데
+// 이것만 이용해서 게임만들려면 아쉬움
+// 스킬, AI이건 무한적으로 tick을 돌면서 막 실행하는 경우는 없음
+// 클라는 rendering을 해야하니까 그래픽을 계산해서 그려야하고 그걸 빨리 그릴수록 화면이 부드러워 지니까
+// 온갖성능을 다 끌어올려서 loof를 돌면서 처리하겠지만
+// 서버코어는 그렇게 1초에 몇백번씩 한 오브젝트를 갱신할 필요가 없음,
+// 보통은 1초단위, 인공지능은 2초, 1초 정도로 주기적으로 체크하면서
+// 객체를 업데이트하면서 로직을 실행(길찾기, 앞으로 이동, 데미지 판별 같은 것들)
+// 빠르게 연산할필요는 없음(클라에 비해)
+// 
+// 클라쪽에서는 별로 신경을 안쓴다고 하면 쿨타임 체크같은건 현재시간을 가져온다음에
+// now에 +1000을 더한게 1초 후의 시간이니까 그게 end라고 하면
+// 현재시간이 end를 지났는지 안지났는지 체크하기 위해 loof를 돌면서 매프레임마다 체크하다가
+// 시간을 다시 계산해서 더 큰지 아닌지를 판별, 더 크면 1초가 경과되었다고 판별,
+// 이런식으로 loof를 돌면서 처리하는게 일반적
+// 서버같은 경우(MMO같은 경우는 특히,) 몇백만번의 loof를 도는건 말도안됨
+// --> 예약 시스템이 필요
+// 1초 후ㅇ에 실행해줘 하는걸 걸어주면 정말 1초후에 실행되는 그런거
+// Unity에서도 코루틴을 이용해서 buildyoursecond? 같은걸 이용해서 쿨타임을 만들곤 함
+// 
+// 지금까지는 일감을 즉흥적으로 만들어서 꽂아주는식으로만 해놨고,
+// 처음으로 들어온 애라면 실행시키게 해놨는데
+// 예약을 해야한다고 하면, 당장은 걔를 실행할필요는 없고 1초후에 일감에 등록을해야한다는거니까
+// 지금 하는 방식과는로직이 달라져야 함
+// 
+// 오늘은 중앙통제를 이용한 방법
+// jobQueue를 이용해서 job을 들고있다고 가정, 우선순위 큐같은 예약한 잡을 들고있따고 하면
+// 언제 실행해야할지 당장은 예측하기 힘듦, 매번 체크해서 실행하려면 애매함
+// --> jobQUeue마다 하나씩 만들어서 거기에 들고있기 보다는,
+// 중앙 시스템을 만들어서 중앙에서 예약된 일감들을 들고 있다가, 빠르게 체크해서 뿌려주는 방식
+// --> Job에 JobTimer 클래스 추가
+// 
+// 여러 일들이 예약된 후에 누군가 하나의 스레드가 담당하게하면 불공평할 수도 있음
+//  모두가 다 만능형 직원이니까
+// -> ThreadManager.h에 새로운 함수 추가
+// 
+// 지금 JobQUeue.h에 만든 DoTimer 같은 부분이 경합이 너무 심하다고 생각되면
+// jobTimer를 수정해서 더 효율적으로 만드는 것도 고려
+#include "pch.h"
+#include "ThreadManager.h"
+#include "Service.h"
+#include "Session.h"
+#include "GameSession.h"
+#include "GameSessionManager.h"
+#include "BufferWriter.h"
+#include "ClientPacketHandler.h"
+#include <tchar.h>
+#include "Protocol.pb.h"
+#include "Job.h"
+#include "Room.h"
+#include "Player.h"
+
+enum
+{
+	WORKER_TICK = 64
+};
+
+void DoWorkerJob(ServerServiceRef& service)
+{
+	while (true)
+	{
+		LEndTickCount = ::GetTickCount64() + WORKER_TICK;
+
+		service->GetIocpCore()->Dispatch(10);
+
+		// 예약된 일감 배분 코드 
+		ThreadManager::DistributeReservedJobs();
+
+		ThreadManager::DoGlobalQueueWork();
+	}
+}
+
+class Knight : public enable_shared_from_this<Knight>
+{
+public:
+	void HealMe(int32 value)
+	{
+		cout << "Heal Me!" << value << endl;
+	}
+
+	void Test()
+	{
+		auto job = [self = shared_from_this()]()
+		{
+			self->HealMe(self->_hp);
+		};
+	}
+private:
+	int32 _hp = 100;
+};
+
+
+int main()
+{
+	// 예약이 필요한 경우(사용할 때)
+	GRoom->DoTimer(1000, [] {cout << "Hello 1000" << endl; }); //1000이 1초
+	GRoom->DoTimer(2000, [] {cout << "Hello 2000" << endl; });
+	GRoom->DoTimer(3000, [] {cout << "Hello 3000" << endl; });
+
+	ClientPacketHandler::Init();
+
+	ServerServiceRef service = MakeShared<ServerService>(
+		NetAddress(L"127.0.0.1", 7777),
+		MakeShared<IocpCore>(),
+		MakeShared<GameSession>, // TODO : SessionManager 등
+		100);
+
+	ASSERT_CRASH(service->Start());
+
+	for (int32 i = 0; i < 5; i++)
+	{
+		GThreadManager->Launch([&service]()//[=]()
+			{
+				while (true)
+				{
+					DoWorkerJob(service);
+				}
+			});
+	}
+
+	DoWorkerJob(service);
+
+	GThreadManager->Join();
+}
+
+// MMO기준 C++은 게임엔진 사용없이 자체제작한대
+// FPS장르는 dedicated서버라고 언리얼 내장 서버를 이용하긴 함
+// server라는 오브젝트를 만들어서 script를 통해 서버를 띄우고 서버빌드로 빌드해서 사용하나요?
+//  --> 유니티를 켜서 서버를 구동하는게 아니라 별도의 프로그램으로 서버를 구동

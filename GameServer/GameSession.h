@@ -16,5 +16,11 @@ public:
 
 	// 자기가 들고있는 플레이어도 메모리 상으로 들고 있긴 해야함
 public:
-	Vector<PlayerRef> _players;
+	Vector<PlayerRef>	_players;
+
+	PlayerRef			_currentPlayer;
+	// room같은 경우는 없을수도 있으니 weakptr, sharedptr도 가능
+	weak_ptr<class Room> _room;
+	// 포인터가 마음에 안들면 아이디를 들고있게 해서
+	// id를 이용해서 딕셔너리, 해시테이블 같은 자료구조로 빼오는 것도 방법
 };

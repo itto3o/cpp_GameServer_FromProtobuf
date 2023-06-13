@@ -2,6 +2,7 @@
 #include "GameSession.h"
 #include "GameSessionManager.h"
 #include "ClientPacketHandler.h"
+#include "Room.h"
 
 void GameSession::OnConnected()
 {
@@ -11,6 +12,20 @@ void GameSession::OnConnected()
 void GameSession::OnDisconnected()
 {
 	GSessionManager.Remove(static_pointer_cast<GameSession>(shared_from_this()));
+
+	// 여기서 확실히 끊어줘야
+	// currentPlayer가 null라면
+	if (_currentPlayer)
+	{
+		// 방도 있을수도, 없을수도 있음, weakptr로 들고있으니까 .lock()을 통해서 sharedptr로 변환한 다음에
+		if (auto room = _room.lock())
+			// null이 아니라면 DoAsync를 해서 예약(currentPlayer를 소멸시켜달라는)
+			room->DoAsync(&Room::Leave, _currentPlayer);
+	}
+
+	// refCount 감소
+	_currentPlayer = nullptr;
+	_players.clear();
 }
 
 void GameSession::OnRecvPacket(BYTE* buffer, int32 len)

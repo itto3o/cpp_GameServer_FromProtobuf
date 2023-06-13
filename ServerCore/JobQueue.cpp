@@ -5,7 +5,7 @@
 	JobQueue
 -------------------*/
 
-void JobQueue::Push(JobRef&& job)
+void JobQueue::Push(JobRef job, bool pushOnly)//(JobRef&& job)
 {
 	// atomic하게 jobCount를 1증가,
 	// fetch add가 반환하는 값은 1증가하기 전의 값을 뱉어줌
@@ -29,7 +29,7 @@ void JobQueue::Push(JobRef&& job)
 	{
 		// prevCount가 0이면 항상 실행했지만 이제는 아님
 		// 먼저 조건 체크, 이미 실행중인 jobQUeue가 없으면 실행
-		if (LCurrentJobQueue == nullptr)
+		if (LCurrentJobQueue == nullptr && pushOnly == false)
 		{
 			// 실행 담당
 			Execute();

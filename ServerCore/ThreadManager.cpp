@@ -72,3 +72,11 @@ void ThreadManager::DoGlobalQueueWork()
 		jobQueue->Execute();
 	}
 }
+
+void ThreadManager::DistributeReservedJobs()
+{
+	// 현재 시간 계산
+	const uint64 now = ::GetTickCount64();
+	
+	GJobTimer->Distribute(now);
+}

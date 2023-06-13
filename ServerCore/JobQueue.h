@@ -6,6 +6,7 @@
 #pragma once
 #include "Job.h"
 #include "LockQueue.h"
+#include "JobTimer.h"
 
 /*------------------
 	JobQueue
@@ -36,15 +37,40 @@ public:
 		//_jobs.Push(job);
 	}
 
+	// 예약이 필요할 경우의 버전
+	void DoTimer(uint64 tickAfter, CallbackType&& callback) 
+	{
+		//Push(ObjectPool<Job>::MakeShared(std::move(callback)));
+		// 원래 push하면서 job을 만들어준후 걔를 바로 jobQueue에 꽂아줬는데
+		JobRef job = ObjectPool<Job>::MakeShared(std::move(callback));
+		// timer에 reserve를 해서 tickafter에 sharedfromthis(오너는 나) 예약
+		GJobTimer->Reserve(tickAfter, shared_from_this(), job);
+
+	}
+
+	template<typename T, typename Ret, typename... Args>
+	void DoTimer(uint64 tickAfter, Ret(T::* memFunc)(Args...), Args... args)
+	{
+		shared_ptr<T> owner = static_pointer_cast<T>(shared_from_this());
+		//Push(ObjectPool<Job>::MakeShared(owner, memFunc, std::forward<Args>(args)...));
+		JobRef job = ObjectPool<Job>::MakeShared(owner, memFunc, std::forward<Args>(args)...);
+		GJobTimer->Reserve(tickAfter, shared_from_this(), job);
+		// 이렇게 예약한 뒤에 누군가가 다시 꺼내서 distribute, 주인을 찾아서 push
+	}
+
 	//virtual void FlushJob() abstract;
 
 	void ClearJobs() { _jobs.Clear(); }
 
-private:
+//private:
 							// 오른값으로 job을 받아서 바로 move를 해서 밀어넣기
-	void				Push(JobRef&& job);
-
+	//void				Push(JobRef&& job); // 얘는 그냥 삭제, 그렇게까지 신경쓸 필요는 없음
+											// 복사하더라도 refCount 1증가, 1감소하는 것 정도
 public:
+	//void				Push(JobRef job);
+	void				Push(JobRef job, bool pushOnly = false); //pushOnly가 true라면 
+											//execute하지 않고 글로벌큐에 넣고 빠져나오기
+											// 배분만 하려는 의도라면 글로벌큐에만 넣으려고
 	void				Execute();
 
 protected:
