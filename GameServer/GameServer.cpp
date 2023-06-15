@@ -958,6 +958,13 @@ int main()
 // 
 // 지금 JobQUeue.h에 만든 DoTimer 같은 부분이 경합이 너무 심하다고 생각되면
 // jobTimer를 수정해서 더 효율적으로 만드는 것도 고려
+// 
+// 
+// MMO기준 C++은 게임엔진 사용없이 자체제작한대
+// FPS장르는 dedicated서버라고 언리얼 내장 서버를 이용하긴 함
+// server라는 오브젝트를 만들어서 script를 통해 서버를 띄우고 서버빌드로 빌드해서 사용하나요?
+//  --> 유니티를 켜서 서버를 구동하는게 아니라 별도의 프로그램으로 서버를 구동
+
 #include "pch.h"
 #include "ThreadManager.h"
 #include "Service.h"
@@ -971,6 +978,7 @@ int main()
 #include "Job.h"
 #include "Room.h"
 #include "Player.h"
+#include "DBConnectionPool.h"
 
 enum
 {
@@ -1015,9 +1023,95 @@ private:
 int main()
 {
 	// 예약이 필요한 경우(사용할 때)
-	GRoom->DoTimer(1000, [] {cout << "Hello 1000" << endl; }); //1000이 1초
-	GRoom->DoTimer(2000, [] {cout << "Hello 2000" << endl; });
-	GRoom->DoTimer(3000, [] {cout << "Hello 3000" << endl; });
+	//GRoom->DoTimer(1000, [] {cout << "Hello 1000" << endl; }); //1000이 1초
+	//GRoom->DoTimer(2000, [] {cout << "Hello 2000" << endl; });
+	//GRoom->DoTimer(3000, [] {cout << "Hello 3000" << endl; });
+
+	// DB connection pool을 만들기, 필요한 개수 만큼, 지금은 하나
+	// connectionString은 구글에 odbc connection string을 치면 id, pwd치는 버전이 있고 trusted버전이 있음
+	// driver는 디비에 따라 다른데 우리는 내장디비니까 내장디비는 sql server native client version
+	// 근데 난 왜 11.0 버전이라고 안뜨냐 아예 있지도 않은데..?
+	// ODBC와 관련된 드라이버를 설치를 해야한다는.. 연결이 안되면 헤딩이 필요할수도 13인가..? 그건 아닌듯..
+	// 나중에는 옵션을 빼서 별도의 파일로 관리해서 읽어서 접근해야
+	//ASSERT_CRASH(GDBConnectionPool->Connect(1, L"Driver={SQL Server Native Client 17.0};Server=(localdb)\\MSSQLLocalDB;Database=ServerDb;Trusted_Connection=Yes;"));
+	ASSERT_CRASH(GDBConnectionPool->Connect(1, L"Driver={ODBC Driver 17 for SQL Server};Server=(localdb)\\MSSQLLocalDB;Database=ServerDb;Trusted_Connection=Yes;"));
+	// 오 Driver를 선생님은 SQL Server Native Client 11.0 이라고 하셨는데 내 driver에는 그런게 없고
+	// 저 native client를 깔려고 검색한 후에 깔았는데 ODBC Driver 11 for SQL Server로 깔려서
+	// ODBC Driver 17 for SQL Server<- 원래 있던 드라이버인데 얘인가 싶어서 얘로 바꿔줬더니 된다..!
+	// 설치할 필요는 없었네 이름이 바뀐거였구나
+
+	// Create Table
+	// gold테이블을 만들 것
+	{
+		auto query = L"										\
+			DROP TABLE IF EXISTS [dbo].[Gold];				\
+			CREATE TABLE [dbo].[Gold]						\
+			(												\
+				[id] INT NOT NULL PRIMARY KEY IDENTITY,		\
+				[gold] INT NULL								\
+			);";
+
+		// 별도로 인자를 넘겨줄 애들도 없고 결과를 받을 애도 없으니까
+		// 그냥 Pool에서 Pop을해서 connection을 꺼내온 다음에 바로 execute
+		DBConnection* dbConn = GDBConnectionPool->Pop();
+		ASSERT_CRASH(dbConn->Execute(query));
+		GDBConnectionPool->Push(dbConn);
+	}
+
+	// Add Data
+	for(int32 i = 0; i < 3; i++)
+	{
+		DBConnection* dbConn = GDBConnectionPool->Pop();
+		
+		// 이제 인자들이 필요해서 unbind : 기존에 바인딩 된 정보 날림
+		dbConn->unbind();
+
+		// 넘길 인자를 바인딩
+		int32 gold = 100;
+		SQLLEN len = 0;
+
+		ASSERT_CRASH(dbConn->BindParam(1, SQL_C_LONG, SQL_INTEGER, sizeof(gold), &gold, &len));
+		
+		// 값들을 ?로 해주면 바인딩된 인자들이 들어감, sql실행
+		// id는 무조건 1씩 증가하는 애니까 안넣어도 ㄱㅊ
+		ASSERT_CRASH(dbConn->Execute(L"INSERT INTO [dbo].[Gold]([gold]) VALUES(?)"));
+		GDBConnectionPool->Push(dbConn);
+	}
+
+	// Read( 컬럼 체크)
+	{
+		DBConnection* dbConn = GDBConnectionPool->Pop();
+		dbConn->unbind();
+
+		// input param : (?)부분이 필요해서 bindparam도 필요함
+		// where문에 들어가서 gold가 100인 애들을 다 보여달라는 조건이 됨
+		int32 gold = 100;
+		SQLLEN len = 0;
+		ASSERT_CRASH(dbConn->BindParam(1, SQL_C_LONG, SQL_INTEGER, sizeof(gold), &gold, &len));
+
+		// 결과를 받아와야함( 두번에 걸쳐서)
+		int32 outId = 0;
+		SQLLEN outIdLen = 0;
+		ASSERT_CRASH(dbConn->BindCol(1, SQL_C_LONG, sizeof(outId), &outId, &outIdLen));
+
+		int32 outGold = 0;
+		SQLLEN outGoldLen = 0;
+		ASSERT_CRASH(dbConn->BindCol(2, SQL_C_LONG, sizeof(outGold), &outGold, &outGoldLen));
+
+		ASSERT_CRASH(dbConn->Execute(L"SELECT id, gold FROM [dbo].[Gold] WHERE gold = (?)"));
+
+		// 하지만, execute가 실행되자마자 outID, outGold에 바로 데이터가 들어가는건 아님
+		// 애당초 select문 자체가 데이터를 하나만 뱉어준다는 보장이 없음
+		// 데이터를 세개 넣어놨으니까 행이 3개가 됨
+		// --> 그냥 긁어오는게 아니라 while로 fetch해서 데이터를 반복적으로 긁어와야함
+		// fetch를 한번 할때마다 바인딩한 컬럼에 데이터가 들어가게 됨
+		while (dbConn->Fetch())
+		{
+			cout << "id : " << outId << " Gold : " << outGold << endl;
+		}
+		GDBConnectionPool->Push(dbConn);
+	}
+
 
 	ClientPacketHandler::Init();
 
@@ -1045,7 +1139,38 @@ int main()
 	GThreadManager->Join();
 }
 
-// MMO기준 C++은 게임엔진 사용없이 자체제작한대
-// FPS장르는 dedicated서버라고 언리얼 내장 서버를 이용하긴 함
-// server라는 오브젝트를 만들어서 script를 통해 서버를 띄우고 서버빌드로 빌드해서 사용하나요?
-//  --> 유니티를 켜서 서버를 구동하는게 아니라 별도의 프로그램으로 서버를 구동
+// DB Connection
+/* 2023-06-15 */
+// DB연동
+// DB 제품군이 다양한데, 실무에서는 보통 윈도우즈서버로 간다고 치면 MSSQL을 많이 씀,
+// 새 프로젝트는 MySQL 등...
+// 연동하는 법이 다르다고 하면 굉장히 힘들 것
+// 그래픽카드도 제품군이 다양하지만 제품마다 연동하는게 다른게 아니라 공용 라이브러리를 이용해서 코드를 만들고
+// 그래픽카드와 연동하는 작업은 각 제조사가 담당,
+// 내부 구현은 어케되어있는지 신경x
+// 
+// --> 지금도 DB와 연동할때 ODBC를 활용해서 작업
+// 세부적인 연동 자체에 대한 내용은 각 제조사들이 맡게 됨
+// 새 필터 : DB 만들기, DBConnection, DBConnectionPool 클래스 두개를 만들기
+// DBCoonnection은 DB와 연결하는 하나의 단위, 그걸 Pooling해서 재사용한다는 의미
+// 
+// connect후에 bind를 통해서 column, 인자들을 다 세팅한 후에 execute를 실행,
+// 받아올 결과가 있다면 fetch
+// 
+// DB가 있어야 얘를 활용할 수 있는데
+// 기본적으로 visualstudio를 깔때 기본적으로 같이 깔리는 내장 DB 활용
+// sql server가 같이 설치가 됨
+// (없다면 installer에서 데이터 스토리지 및 뭐시기 설치)
+// 
+// SQL Server 개체 탐색기>데이터베이스 우클릭> 새 데이터베이스 추가>ServerDb
+// ServerDb 우클릭> 속성 > 연결 문자열에 보면 Data Source = (local~~ 부분 기억하기
+// (난 왜 안뜨냐,,?)
+// 
+// 사용하기 좀 더러움, 만들어주는 부분, sql len을 만들어서 건네주는 작업이 번거로움
+// 
+// Q. ORM을 사용하지 않는 이유 : 전문적인 DBA를 채용해서 sql 구문을 만들어서 관리해도 무리가 없음
+// Q. 서버단위로 유저군을 나누지 않고 통합해서 사용한다면 RDBMS는 몇명까지?
+// A. 컨텐츠 부하에 따라 다름, rdbms보다 cpu부하가 커져서 버티지 못하는 상황도 있고
+//		DB + Cpu + network까지 다 맞아떨어져야 '수용'가능한거라 테스트해봐야함,
+//		일반적인 MMO기준으로는 5천명~1만명정도가 적당 선
+// 

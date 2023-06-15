@@ -1,0 +1,188 @@
+#include "pch.h"
+#include "DBConnection.h"
+
+/*-----------------
+	DBConnection
+------------------*/
+bool DBConnection::Connect(SQLHENV henv, const WCHAR* connectionString)
+{
+	// 진짜로 DB와 연결
+	// handle을 할당, SQLHDBC의 connectionHandle을 만들어줌
+	if (::SQLAllocHandle(SQL_HANDLE_DBC, henv, &_connection) != SQL_SUCCESS)
+		return false;
+
+	// connection string을 이용해서 실질적으로 DB연결
+	WCHAR stringBuffer[MAX_PATH] = { 0 };
+	// wcscpy_s 문자열 복사 함수(WCHAR전용인듯)
+	::wcscpy_s(stringBuffer, connectionString);
+
+	// 실행 결과를 담을 버퍼
+	WCHAR resultString[MAX_PATH] = { 0 };
+	SQLSMALLINT resultStringLen = 0; // resultString의 길이
+
+	// wchar버전을 이용해서 받음
+	SQLRETURN ret = ::SQLDriverConnectW(
+		_connection,
+		NULL,
+		reinterpret_cast<SQLWCHAR*>(stringBuffer),
+		_countof(stringBuffer),
+		OUT reinterpret_cast<SQLWCHAR*>(resultString),
+		_countof(resultString),
+		OUT & resultStringLen,
+		SQL_DRIVER_NOPROMPT
+	);
+
+	// statement 같이 만들기
+	if (::SQLAllocHandle(SQL_HANDLE_STMT, _connection, &_statement) != SQL_SUCCESS)
+		return false;
+
+	return (ret == SQL_SUCCESS || ret == SQL_SUCCESS_WITH_INFO);
+}
+
+void DBConnection::Clear()
+{
+	if (_connection != SQL_NULL_HANDLE)
+	{
+		::SQLFreeHandle(SQL_HANDLE_DBC, _connection);
+		_connection = SQL_NULL_HANDLE;
+	}
+
+	if (_statement != SQL_NULL_HANDLE)
+	{
+		::SQLFreeHandle(SQL_HANDLE_STMT, _statement);
+		_statement = SQL_NULL_HANDLE;
+	}
+}
+
+bool DBConnection::Execute(const WCHAR* query)
+{
+	// query를 받아서 걔를 실행해달라
+	// statement를 이용해서 여러가지 인자들을 같이 던져줄 것
+	SQLRETURN ret = ::SQLExecDirectW(_statement, (SQLWCHAR*)query, SQL_NTSL);
+	if (ret == SQL_SUCCESS || ret == SQL_SUCCESS_WITH_INFO)
+		return true;
+
+	HandleError(ret);
+	return false;
+}
+
+bool DBConnection::Fetch()
+{
+	// 데이터를 긁어올 때 사용
+
+	// 성공했다면 받아올 데이터가 있다는 뜻
+	SQLRETURN ret = ::SQLFetch(_statement);
+
+	switch (ret)
+	{
+	case SQL_SUCCESS:
+	case SQL_SUCCESS_WITH_INFO:
+		return true;
+	case SQL_NO_DATA:
+		// 데이터가 없다면
+		// 쿼리는 성공했지만 반환하는 값이 딱히 없다면 nodata가 뜸
+		return false;
+	case SQL_ERROR:
+		// 요청이 잘못됐다면 error
+		HandleError(ret);
+		return false;
+	default:
+		return true;
+	}
+}
+
+int32 DBConnection::GetRowCount()
+{
+	// 데이터가 몇개 있는지
+	// statement는 인자를 넘길때도 사용, 쿼리 후 인자들을 받아올 때도 사용
+	SQLLEN count = 0;
+	SQLRETURN ret = ::SQLRowCount(_statement, OUT &count);
+
+	if (ret == SQL_SUCCESS || ret == SQL_SUCCESS_WITH_INFO)
+		return static_cast<int32>(count);
+
+	return -1;
+}
+
+void DBConnection::unbind()
+{
+	// 밑의 bind param, bind col함수를 통해 인자들을 받아오기도 하고 넘겨주기도 할텐데
+	// 처음에 사용할때는 이전에 매핑되었던 데이터가 있을 수 있으니까 그것들을 날려줘야함
+	::SQLFreeStmt(_statement, SQL_UNBIND);
+	::SQLFreeStmt(_statement, SQL_RESET_PARAMS);
+	::SQLFreeStmt(_statement, SQL_CLOSE);
+}
+
+bool DBConnection::BindParam(SQLUSMALLINT paramIndex, SQLSMALLINT cType, SQLSMALLINT sqlType, SQLULEN len, SQLPOINTER ptr, SQLLEN* index)
+{
+	// 몇번째 인자를 무엇으로 세팅하고 싶은지를 넣어주기									// 데이터가 있는 곳을 pointer로 넘겨주기, index는 가변길이일 경우
+	SQLRETURN ret = ::SQLBindParameter(_statement, paramIndex, SQL_PARAM_INPUT, cType, sqlType, len, 0, ptr, 0, index);
+	if (ret != SQL_SUCCESS && ret != SQL_SUCCESS_WITH_INFO)
+	{
+		HandleError(ret);
+		return false;
+	}
+
+	return true;
+}
+
+bool DBConnection::BindCol(SQLUSMALLINT columnIndex, SQLSMALLINT cType, SQLULEN len, SQLPOINTER value, SQLLEN* index)
+{
+	SQLRETURN ret = ::SQLBindCol(_statement, columnIndex, cType, value, len, index);
+	if (ret != SQL_SUCCESS && ret != SQL_SUCCESS_WITH_INFO)
+	{
+		HandleError(ret);
+		return false;
+	}
+
+	return true;
+}
+
+void DBConnection::HandleError(SQLRETURN ret)
+{
+	// 성공이라면 잘못온거니까 return
+	if (ret == SQL_SUCCESS)
+		return;
+
+	// 어떤 에러인지 알아보기 위한 인자들
+	SQLSMALLINT index = 1;
+	SQLWCHAR sqlState[MAX_PATH] = { 0 };
+	SQLINTEGER nativeErr = 0;
+
+	// 어떤 사유로 인한 에러인지 메시지 받아옴
+	SQLWCHAR errMsg[MAX_PATH] = { 0 };
+	SQLSMALLINT msgLen = 0;
+	SQLRETURN errorRet = 0;
+
+	while (true)
+	{
+		// error 메시지 추출
+		errorRet = ::SQLGetDiagRecW(
+			SQL_HANDLE_STMT,
+			_statement,
+			index,
+			sqlState,
+			OUT &nativeErr,
+			errMsg,
+			_countof(errMsg),
+			OUT &msgLen
+		);
+
+		// 아무런 에러가 없으면 return
+		if (errorRet == SQL_NO_DATA)
+			break;
+
+		// success였다면 별다른 문제 x
+		// == ||여야 하는게 아닌가 sql_success와 with info가 둘다 아니면 break..?
+		if (errorRet != SQL_SUCCESS && errorRet != SQL_SUCCESS_WITH_INFO)
+			break;
+
+		// TODO : Log
+		// 해당하는 에러메시지가 무엇인지
+		// 한국어 환경도 포함될 수 있으니까 한국어로 설정
+		wcout.imbue(locale("kor"));
+		wcout << errMsg << endl; // 나중엔 파일입출력으로
+
+		index++;
+	}
+}
