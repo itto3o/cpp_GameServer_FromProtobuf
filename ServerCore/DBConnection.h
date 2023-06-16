@@ -5,6 +5,12 @@
 /*-----------------
 	DBConnection
 ------------------*/
+
+enum 
+{
+	WVARCHAR_MAX = 4000,
+	BINARY_MAX = 8000
+};
 class DBConnection
 {
 public:
@@ -17,6 +23,37 @@ public:
 	void			unbind();
 
 public:
+	// 이렇게 오버로딩이 많을 경우에는 하나씩 클릭해서 구현부를 만들기 보다는
+	// 클래스 클릭>alt shift q>create method implementation
+	// 왜 난 안돼....?
+	bool			BindParam(int32 paramIndex, bool* value, SQLLEN* index);
+	bool			BindParam(int32 paramIndex, float* value, SQLLEN* index);
+	bool			BindParam(int32 paramIndex, double* value, SQLLEN* index);
+	bool			BindParam(int32 paramIndex, int8* value, SQLLEN* index);
+	bool			BindParam(int32 paramIndex, int16* value, SQLLEN* index);
+	bool			BindParam(int32 paramIndex, int32* value, SQLLEN* index);
+	bool			BindParam(int32 paramIndex, int64* value, SQLLEN* index);
+												// unsigned는 DB제품군에 따라 unsigned라는 개념이 없음
+												//--> 그냥 더 큰 영역에 sigend를 해야함
+												// 캐스팅 문제로 인해 지원을 해줄 계획이 없대
+												// boolean도 없지만 int8짜리로 만들면됨
+
+	bool			BindParam(int32 paramIndex, TIMESTAMP_STRUCT* value, SQLLEN* index);
+	bool			BindParam(int32 paramIndex, const WCHAR* str, SQLLEN* index);
+	bool			BindParam(int32 paramIndex, const BYTE* bin, int32 size, SQLLEN* index); // 이미지
+
+	bool			BindCol(int32 columnIndex, bool* value, SQLLEN* index);
+	bool			BindCol(int32 columnIndex, float* value, SQLLEN* index);
+	bool			BindCol(int32 columnIndex, double* value, SQLLEN* index);
+	bool			BindCol(int32 columnIndex, int8* value, SQLLEN* index);
+	bool			BindCol(int32 columnIndex, int16* value, SQLLEN* index);
+	bool			BindCol(int32 columnIndex, int32* value, SQLLEN* index);
+	bool			BindCol(int32 columnIndex, int64* value, SQLLEN* index);
+	bool			BindCol(int32 columnIndex, TIMESTAMP_STRUCT* value, SQLLEN* index);
+	bool			BindCol(int32 columnIndex, const WCHAR* str, int32 size, SQLLEN* index);
+	bool			BindCol(int32 columnIndex, const BYTE* bin, int32 size, SQLLEN* index);
+
+private:
 	// sql qeury할때 statment를 통해서 인자들을 넘겨주기 위함
 	// 인자가 여러개일 수 있으니까 parameter의 순서를 같이, ctype은 c데이터 형식,
 	// ctype : ODBC는 c++만 지원하는건 아니니까 자료형에 따라 ctype, sqltype형식이 다 있음,

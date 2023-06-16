@@ -904,7 +904,7 @@ int main()
 */
 
 // JobTimer
-/* 2023-06-13 */
+/* 2023-06-13
 // 지난 시간에 했던 것 수정
 // : shared_ptr를 사용해서 하고 있는데, refCount이 되기 때문에 오염된 메모리를 건드리거나 하는 확률은 줄이지만
 // 메모리 릭이 날 상황이 큼
@@ -1138,9 +1138,10 @@ int main()
 
 	GThreadManager->Join();
 }
+*/
 
 // DB Connection
-/* 2023-06-15 */
+/* 2023-06-15
 // DB연동
 // DB 제품군이 다양한데, 실무에서는 보통 윈도우즈서버로 간다고 치면 MSSQL을 많이 씀,
 // 새 프로젝트는 MySQL 등...
@@ -1173,4 +1174,174 @@ int main()
 // A. 컨텐츠 부하에 따라 다름, rdbms보다 cpu부하가 커져서 버티지 못하는 상황도 있고
 //		DB + Cpu + network까지 다 맞아떨어져야 '수용'가능한거라 테스트해봐야함,
 //		일반적인 MMO기준으로는 5천명~1만명정도가 적당 선
-// 
+*/
+
+// DB Bind
+/* 2023-06-16 */
+// 데이터를 저장하고 사용하는데,
+// 생각보다 복잡하고 실수의 여지도 많고, 타입을 지정해야함
+// --> DBConnection class를 열어서 BindParam, BindCol 등등은 내부에서만 사용하도록 praviate
+// 인자를 매번 생성해야함, 모든 데이터들을 순서대로 매핑했는지?
+// 그 순서도 운나쁘게 뒤바꿨다면 문제가 될 것
+// --> 실수를 줄이기 위해 DBBind라는 이름의 매퍼클래스를 만들엊루것
+#include "pch.h"
+#include "ThreadManager.h"
+#include "Service.h"
+#include "Session.h"
+#include "GameSession.h"
+#include "GameSessionManager.h"
+#include "BufferWriter.h"
+#include "ClientPacketHandler.h"
+#include <tchar.h>
+#include "Protocol.pb.h"
+#include "Job.h"
+#include "Room.h"
+#include "Player.h"
+#include "DBConnectionPool.h"
+
+enum
+{
+	WORKER_TICK = 64
+};
+
+void DoWorkerJob(ServerServiceRef& service)
+{
+	while (true)
+	{
+		LEndTickCount = ::GetTickCount64() + WORKER_TICK;
+
+		service->GetIocpCore()->Dispatch(10);
+
+		ThreadManager::DistributeReservedJobs();
+
+		ThreadManager::DoGlobalQueueWork();
+	}
+}
+
+class Knight : public enable_shared_from_this<Knight>
+{
+public:
+	void HealMe(int32 value)
+	{
+		cout << "Heal Me!" << value << endl;
+	}
+
+	void Test()
+	{
+		auto job = [self = shared_from_this()]()
+		{
+			self->HealMe(self->_hp);
+		};
+	}
+private:
+	int32 _hp = 100;
+};
+
+
+int main()
+{
+	ASSERT_CRASH(GDBConnectionPool->Connect(1, L"Driver={ODBC Driver 17 for SQL Server};Server=(localdb)\\MSSQLLocalDB;Database=ServerDb;Trusted_Connection=Yes;"));
+	{
+		auto query = L"										\
+			DROP TABLE IF EXISTS [dbo].[Gold];				\
+			CREATE TABLE [dbo].[Gold]						\
+			(												\
+				[id] INT NOT NULL PRIMARY KEY IDENTITY,		\
+				[gold] INT NULL,							\
+				[name] NVARCHAR(50) NULL,					\
+				[createDate] DATETIME NULL					\
+			);";
+
+		DBConnection* dbConn = GDBConnectionPool->Pop();
+		ASSERT_CRASH(dbConn->Execute(query));
+		GDBConnectionPool->Push(dbConn);
+	}
+
+	for (int32 i = 0; i < 3; i++)
+	{
+		DBConnection* dbConn = GDBConnectionPool->Pop();
+
+		dbConn->unbind();
+
+		int32 gold = 100;
+		SQLLEN len = 0;
+
+		WCHAR name[100] = L"루키스";
+		SQLLEN nameLen = 0;
+
+		TIMESTAMP_STRUCT ts = {};
+		ts.year = 2021;
+		ts.month = 6;
+		ts.day = 5;
+		SQLLEN tsLen = 0;
+
+		ASSERT_CRASH(dbConn->BindParam(1, &gold, &len));
+		ASSERT_CRASH(dbConn->BindParam(2, name, &nameLen));
+		ASSERT_CRASH(dbConn->BindParam(3, &ts, &tsLen));
+
+		ASSERT_CRASH(dbConn->Execute(L"INSERT INTO [dbo].[Gold]([gold], [name], [createDate]) VALUES(?, ?, ?)"));
+		GDBConnectionPool->Push(dbConn);
+	}
+
+	{
+		DBConnection* dbConn = GDBConnectionPool->Pop();
+		dbConn->unbind();
+
+		int32 gold = 100;
+		SQLLEN len = 0;
+		ASSERT_CRASH(dbConn->BindParam(1, &gold, &len));
+
+		int32 outId = 0;
+		SQLLEN outIdLen = 0;
+		ASSERT_CRASH(dbConn->BindCol(1, &outId, &outIdLen));
+
+		int32 outGold = 0;
+		SQLLEN outGoldLen = 0;
+		ASSERT_CRASH(dbConn->BindCol(2, &outGold, &outGoldLen));
+
+		WCHAR outName[100];
+		SQLLEN outNameLen = 0;
+		ASSERT_CRASH(dbConn->BindCol(3, outName, len32(outName), &outNameLen));
+
+		TIMESTAMP_STRUCT outDate = {};
+		SQLLEN outDateLen = 0;
+		ASSERT_CRASH(dbConn->BindCol(4, &outDate, &outDateLen));
+
+		ASSERT_CRASH(dbConn->Execute(L"SELECT id, gold, name, createDate FROM [dbo].[Gold] WHERE gold = (?)"));
+
+		// 한국어 지원
+		wcout.imbue(locale("kor"));
+		while (dbConn->Fetch())
+		{
+			wcout << "id : " << outId << " Gold : " << outGold << " Name: "<< outName << endl;
+			wcout << "Date : " << outDate.year << "/" << outDate.month << "/" << outDate.day << endl;
+		}
+		GDBConnectionPool->Push(dbConn);
+	}
+
+
+	ClientPacketHandler::Init();
+
+	ServerServiceRef service = MakeShared<ServerService>(
+		NetAddress(L"127.0.0.1", 7777),
+		MakeShared<IocpCore>(),
+		MakeShared<GameSession>, // TODO : SessionManager 등
+		100);
+
+	ASSERT_CRASH(service->Start());
+
+	for (int32 i = 0; i < 5; i++)
+	{
+		GThreadManager->Launch([&service]()//[=]()
+			{
+				while (true)
+				{
+					DoWorkerJob(service);
+				}
+			});
+	}
+
+	DoWorkerJob(service);
+
+	GThreadManager->Join();
+}

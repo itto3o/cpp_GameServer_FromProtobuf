@@ -113,6 +113,136 @@ void DBConnection::unbind()
 	::SQLFreeStmt(_statement, SQL_CLOSE);
 }
 
+bool DBConnection::BindParam(int32 paramIndex, bool* value, SQLLEN* index)
+{
+	return BindParam(paramIndex, SQL_C_TINYINT, SQL_TINYINT, size32(bool), value, index);
+}
+
+bool DBConnection::BindParam(int32 paramIndex, float* value, SQLLEN* index)
+{
+													// size는 일반정수가 아닐땐 0으로 밀어주면 됨
+	return BindParam(paramIndex, SQL_C_FLOAT, SQL_REAL, 0, value, index);
+}
+
+bool DBConnection::BindParam(int32 paramIndex, double* value, SQLLEN* index)
+{
+	return BindParam(paramIndex, SQL_C_DOUBLE, SQL_DOUBLE, 0, value, index);
+}
+
+bool DBConnection::BindParam(int32 paramIndex, int8* value, SQLLEN* index)
+{
+	return BindParam(paramIndex, SQL_C_TINYINT, SQL_TINYINT, size32(int8), value, index);
+}
+
+bool DBConnection::BindParam(int32 paramIndex, int16* value, SQLLEN* index)
+{
+	return BindParam(paramIndex, SQL_C_SHORT, SQL_SMALLINT, size32(int16), value, index);
+}
+
+bool DBConnection::BindParam(int32 paramIndex, int32* value, SQLLEN* index)
+{
+	return BindParam(paramIndex, SQL_C_LONG, SQL_INTEGER, size32(int32), value, index);
+}
+
+bool DBConnection::BindParam(int32 paramIndex, int64* value, SQLLEN* index)
+{
+	return BindParam(paramIndex, SQL_C_SBIGINT, SQL_BIGINT, size32(int64), value, index);
+}
+
+bool DBConnection::BindParam(int32 paramIndex, TIMESTAMP_STRUCT* value, SQLLEN* index)
+{
+	return BindParam(paramIndex, SQL_C_TYPE_TIMESTAMP, SQL_TYPE_TIMESTAMP, size32(TIMESTAMP_STRUCT), value, index);
+}
+
+bool DBConnection::BindParam(int32 paramIndex, const WCHAR* str, SQLLEN* index)
+{
+	// 문자열의 크기를 알아와야함
+	// null 값까지 추가한 길이를 더해줘서 WCHAR기 때문에 *2
+	// 일반 정수가 아니라서 sql ntsl를 설정해줘야함
+	SQLULEN size = static_cast<SQLULEN>((::wcslen(str) + 1) * 2);
+	*index = SQL_NTSL;
+
+	// 4000은 임의로 정한게 아니라 테스트해보면 4000이 경계선
+	// 4000 이상, 이하에 따라 타입이 달라질 수 있는데
+	// 하드코딩 하기 좀 그러니까 헤더파일에 enum 설정
+	if(size > WVARCHAR_MAX)
+												// 너무 크면 long varchar로
+		return BindParam(paramIndex, SQL_C_WCHAR, SQL_WLONGVARCHAR, size, (SQLPOINTER)str, index);
+	else
+		return BindParam(paramIndex, SQL_C_WCHAR, SQL_WVARCHAR, size, (SQLPOINTER)str, index);
+}
+
+bool DBConnection::BindParam(int32 paramIndex, const BYTE* bin, int32 size, SQLLEN* index)
+{
+	// binary를 밀어넣을땐
+	// 텅텅비었다면 null로 바꿔치기
+	if (bin == nullptr)
+	{
+		*index = SQL_NULL_DATA;
+		size = 1;
+	}
+	// 그게 아니라면 index에 size를 넣어주고
+	else
+		*index = size;
+
+	// 4000보다 크다면 다른 타입으로
+	if(size > BINARY_MAX)
+		return BindParam(paramIndex, SQL_C_BINARY, SQL_LONGVARBINARY, size, (BYTE*)bin, index);
+
+	else
+		return BindParam(paramIndex, SQL_C_BINARY, SQL_BINARY, size, (BYTE*)bin, index);
+}
+
+bool DBConnection::BindCol(int32 columnIndex, bool* value, SQLLEN* index)
+{
+	return BindCol(columnIndex, SQL_C_TINYINT, size32(bool), value, index);
+}
+
+bool DBConnection::BindCol(int32 columnIndex, float* value, SQLLEN* index)
+{
+	return BindCol(columnIndex, SQL_C_FLOAT, size32(float), value, index);
+}
+
+bool DBConnection::BindCol(int32 columnIndex, double* value, SQLLEN* index)
+{
+	return BindCol(columnIndex, SQL_C_DOUBLE, size32(double), value, index);
+}
+
+bool DBConnection::BindCol(int32 columnIndex, int8* value, SQLLEN* index)
+{
+	return BindCol(columnIndex, SQL_C_TINYINT, size32(int8), value, index);
+}
+
+bool DBConnection::BindCol(int32 columnIndex, int16* value, SQLLEN* index)
+{
+	return BindCol(columnIndex, SQL_C_SHORT, size32(int16), value, index);
+}
+
+bool DBConnection::BindCol(int32 columnIndex, int32* value, SQLLEN* index)
+{
+	return BindCol(columnIndex, SQL_C_LONG, size32(int32), value, index);
+}
+
+bool DBConnection::BindCol(int32 columnIndex, int64* value, SQLLEN* index)
+{
+	return BindCol(columnIndex, SQL_C_SBIGINT, size32(int64), value, index);
+}
+
+bool DBConnection::BindCol(int32 columnIndex, TIMESTAMP_STRUCT* value, SQLLEN* index)
+{
+	return BindCol(columnIndex, SQL_C_TYPE_TIMESTAMP, size32(TIMESTAMP_STRUCT), value, index);
+}
+
+bool DBConnection::BindCol(int32 columnIndex, const WCHAR* str, int32 size, SQLLEN* index)
+{
+	return BindCol(columnIndex, SQL_C_WCHAR, size, str, index);
+}
+
+bool DBConnection::BindCol(int32 columnIndex, const BYTE* bin, int32 size, SQLLEN* index)
+{
+	return BindCol(columnIndex, SQL_BINARY, size, bin, index);
+}
+
 bool DBConnection::BindParam(SQLUSMALLINT paramIndex, SQLSMALLINT cType, SQLSMALLINT sqlType, SQLULEN len, SQLPOINTER ptr, SQLLEN* index)
 {
 	// 몇번째 인자를 무엇으로 세팅하고 싶은지를 넣어주기									// 데이터가 있는 곳을 pointer로 넘겨주기, index는 가변길이일 경우
