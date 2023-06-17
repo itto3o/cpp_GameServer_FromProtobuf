@@ -1198,6 +1198,7 @@ int main()
 #include "Room.h"
 #include "Player.h"
 #include "DBConnectionPool.h"
+#include "DBBInd.h"
 
 enum
 {
@@ -1261,53 +1262,85 @@ int main()
 	{
 		DBConnection* dbConn = GDBConnectionPool->Pop();
 
-		dbConn->unbind();
+		// DBBind.h를 만든 후 코드
+		// input 3, output 0, DBBind에 쿼리 건네주기
+		DBBind<3, 0> dbBind(*dbConn, L"INSERT INTO [dbo].[Gold]([gold], [name], [createDate]) VALUES(?, ?, ?)");
 
 		int32 gold = 100;
-		SQLLEN len = 0;
-
+		dbBind.BindParam(0, gold);
 		WCHAR name[100] = L"루키스";
-		SQLLEN nameLen = 0;
+		dbBind.BindParam(1, name);
+		TIMESTAMP_STRUCT ts = {2021, 6, 5}; // y, m, d 순서대로 되어있어서 2021, 6, 5 넣어도됨
+		dbBind.BindParam(2, ts);
 
-		TIMESTAMP_STRUCT ts = {};
-		ts.year = 2021;
-		ts.month = 6;
-		ts.day = 5;
-		SQLLEN tsLen = 0;
+		// 3, 0을 입력해놓고 3개를 안채워져잇으면 crash가 날 것
+		ASSERT_CRASH(dbBind.Execute());
 
-		ASSERT_CRASH(dbConn->BindParam(1, &gold, &len));
-		ASSERT_CRASH(dbConn->BindParam(2, name, &nameLen));
-		ASSERT_CRASH(dbConn->BindParam(3, &ts, &tsLen));
+		//dbConn->unbind();
 
-		ASSERT_CRASH(dbConn->Execute(L"INSERT INTO [dbo].[Gold]([gold], [name], [createDate]) VALUES(?, ?, ?)"));
+		//int32 gold = 100;
+		//SQLLEN len = 0;
+
+		//WCHAR name[100] = L"루키스";
+		//SQLLEN nameLen = 0;
+
+		//TIMESTAMP_STRUCT ts = {};
+		//ts.year = 2021;
+		//ts.month = 6;
+		//ts.day = 5;
+		//SQLLEN tsLen = 0;
+
+		//ASSERT_CRASH(dbConn->BindParam(1, &gold, &len));
+		//ASSERT_CRASH(dbConn->BindParam(2, name, &nameLen));
+		//ASSERT_CRASH(dbConn->BindParam(3, &ts, &tsLen));
+
+		//ASSERT_CRASH(dbConn->Execute(L"INSERT INTO [dbo].[Gold]([gold], [name], [createDate]) VALUES(?, ?, ?)"));
 		GDBConnectionPool->Push(dbConn);
 	}
 
 	{
 		DBConnection* dbConn = GDBConnectionPool->Pop();
-		dbConn->unbind();
+		dbConn->Unbind();
+
+		DBBind<1, 4> dbBind(*dbConn, L"SELECT id, gold, name, createDate FROM [dbo].[Gold] WHERE gold = (?)");
 
 		int32 gold = 100;
-		SQLLEN len = 0;
-		ASSERT_CRASH(dbConn->BindParam(1, &gold, &len));
+		dbBind.BindParam(0, gold);
 
 		int32 outId = 0;
-		SQLLEN outIdLen = 0;
-		ASSERT_CRASH(dbConn->BindCol(1, &outId, &outIdLen));
-
 		int32 outGold = 0;
-		SQLLEN outGoldLen = 0;
-		ASSERT_CRASH(dbConn->BindCol(2, &outGold, &outGoldLen));
-
 		WCHAR outName[100];
-		SQLLEN outNameLen = 0;
-		ASSERT_CRASH(dbConn->BindCol(3, outName, len32(outName), &outNameLen));
-
 		TIMESTAMP_STRUCT outDate = {};
-		SQLLEN outDateLen = 0;
-		ASSERT_CRASH(dbConn->BindCol(4, &outDate, &outDateLen));
 
-		ASSERT_CRASH(dbConn->Execute(L"SELECT id, gold, name, createDate FROM [dbo].[Gold] WHERE gold = (?)"));
+		// 순차적으로 관리하고 있지만 간단해짐, 순차관리는 나중에
+		dbBind.BindCol(0, OUT outId);
+		dbBind.BindCol(1, OUT outGold);
+		dbBind.BindCol(2, OUT outName);
+		dbBind.BindCol(3, OUT outDate);
+
+		ASSERT_CRASH(dbBind.Execute());
+
+		//int32 gold = 100;
+		//SQLLEN len = 0;
+		//ASSERT_CRASH(dbConn->BindParam(1, &gold, &len));
+
+		//int32 outId = 0;
+		//SQLLEN outIdLen = 0;
+		//ASSERT_CRASH(dbConn->BindCol(1, &outId, &outIdLen));
+
+		//int32 outGold = 0;
+		//SQLLEN outGoldLen = 0;
+		//ASSERT_CRASH(dbConn->BindCol(2, &outGold, &outGoldLen));
+
+		//WCHAR outName[100];
+		//SQLLEN outNameLen = 0;
+		//ASSERT_CRASH(dbConn->BindCol(3, outName, len32(outName), &outNameLen));
+
+		//TIMESTAMP_STRUCT outDate = {};
+		//SQLLEN outDateLen = 0;
+		//ASSERT_CRASH(dbConn->BindCol(4, &outDate, &outDateLen));
+
+		//ASSERT_CRASH(dbConn->Execute(L"SELECT id, gold, name, createDate FROM [dbo].[Gold] WHERE gold = (?)"));
 
 		// 한국어 지원
 		wcout.imbue(locale("kor"));
@@ -1345,3 +1378,8 @@ int main()
 
 	GThreadManager->Join();
 }
+
+// Q. _paramIndex, _columnIndex 어떤 역할을 하는지? 
+//		코드를 따라가보면 ::SQLBIndParameter 함수의 마지막 인자로 들어가게 됨,
+//		--> 결국 모든 경우에 0을 전달하게 되는데 굳이?
+// A. 값을 저달 목적이 아니라 공간을 할당해줌, 기본적으로는 0초기화되어있지만, 길이를 전달할때 값이 들어감

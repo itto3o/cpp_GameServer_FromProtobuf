@@ -20,7 +20,7 @@ public:
 	bool			Execute(const WCHAR* query); // sql 쿼리를 실행하는 함수
 	bool			Fetch(); // 결과를 받아오는 애랑 관련
 	int32			GetRowCount();
-	void			unbind();
+	void			Unbind();
 
 public:
 	// 이렇게 오버로딩이 많을 경우에는 하나씩 클릭해서 구현부를 만들기 보다는
@@ -50,8 +50,10 @@ public:
 	bool			BindCol(int32 columnIndex, int32* value, SQLLEN* index);
 	bool			BindCol(int32 columnIndex, int64* value, SQLLEN* index);
 	bool			BindCol(int32 columnIndex, TIMESTAMP_STRUCT* value, SQLLEN* index);
-	bool			BindCol(int32 columnIndex, const WCHAR* str, int32 size, SQLLEN* index);
-	bool			BindCol(int32 columnIndex, const BYTE* bin, int32 size, SQLLEN* index);
+												// const가 들어가있어서 오류났던것..
+												// param은 const여야되는데 col은 받아오는거니까 노필요인듯
+	bool			BindCol(int32 columnIndex, WCHAR* str, int32 size, SQLLEN* index);
+	bool			BindCol(int32 columnIndex, BYTE* bin, int32 size, SQLLEN* index);
 
 private:
 	// sql qeury할때 statment를 통해서 인자들을 넘겨주기 위함

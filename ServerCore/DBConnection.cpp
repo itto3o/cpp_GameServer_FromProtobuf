@@ -104,7 +104,7 @@ int32 DBConnection::GetRowCount()
 	return -1;
 }
 
-void DBConnection::unbind()
+void DBConnection::Unbind()
 {
 	// 밑의 bind param, bind col함수를 통해 인자들을 받아오기도 하고 넘겨주기도 할텐데
 	// 처음에 사용할때는 이전에 매핑되었던 데이터가 있을 수 있으니까 그것들을 날려줘야함
@@ -233,12 +233,12 @@ bool DBConnection::BindCol(int32 columnIndex, TIMESTAMP_STRUCT* value, SQLLEN* i
 	return BindCol(columnIndex, SQL_C_TYPE_TIMESTAMP, size32(TIMESTAMP_STRUCT), value, index);
 }
 
-bool DBConnection::BindCol(int32 columnIndex, const WCHAR* str, int32 size, SQLLEN* index)
+bool DBConnection::BindCol(int32 columnIndex, WCHAR* str, int32 size, SQLLEN* index)
 {
 	return BindCol(columnIndex, SQL_C_WCHAR, size, str, index);
 }
 
-bool DBConnection::BindCol(int32 columnIndex, const BYTE* bin, int32 size, SQLLEN* index)
+bool DBConnection::BindCol(int32 columnIndex, BYTE* bin, int32 size, SQLLEN* index)
 {
 	return BindCol(columnIndex, SQL_BINARY, size, bin, index);
 }
