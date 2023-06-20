@@ -1177,7 +1177,7 @@ int main()
 */
 
 // DB Bind
-/* 2023-06-16 */
+/* 2023-06-16
 // 데이터를 저장하고 사용하는데,
 // 생각보다 복잡하고 실수의 여지도 많고, 타입을 지정해야함
 // --> DBConnection class를 열어서 BindParam, BindCol 등등은 내부에서만 사용하도록 praviate
@@ -1383,3 +1383,258 @@ int main()
 //		코드를 따라가보면 ::SQLBIndParameter 함수의 마지막 인자로 들어가게 됨,
 //		--> 결국 모든 경우에 0을 전달하게 되는데 굳이?
 // A. 값을 저달 목적이 아니라 공간을 할당해줌, 기본적으로는 0초기화되어있지만, 길이를 전달할때 값이 들어감
+*/
+
+// XML Parser
+/* 2023-06-20 */
+// 포폴용으로는 지금도 차고 넘치지만, 기업용이나 실제 라이브를 운영한다고 하면 신경써야할 부분이 있음
+// 버전관리 : 자료많음, Git 등등, 버전으로 돌아가고 싶다 등
+// 라이브에서는 항상 최신 버전을 배포하는게 아님, 한 번 안정화해서 버그가 수정되면
+// 수정된 버전을 내보낸 후, 그 버전에서 버그를 수정한 후 배포 등등
+// 
+// DB가 들어가기 시작하면 애매해짐
+// DB에 어떤 정보가 들어가있긴 하지만 이거 자체를 버전관리 해주고 있진 않음
+// 서버를 띄울때마다 drop후 create하는 건 말도안됨,
+// --> 어떤 식으로건 작업하고 있는 소스 코드랑 DB 버전을 맞춰줘야
+// ORM 기술을 사용한다면 이런 부분도 다 해줌 NTTCore C#에서는 migration이 생김,
+// account table, index 어케해줘야한다는 등의 코드를 이용해 migraton가능, 버전 왔다갔다 가능,
+// --> 소스코드에서 하고 있기 때문에 알아서 DB, 버전이 맞춰지는데
+// 
+// odb를 이용해서 직접적으로 쿼리를 날리는 경우라면?
+// 버전이 안맞는다면, 없던 컬럼에 데이터를 억세스할 수도 있게 됨
+// --> 2가지 방법, Main에 DB라는 폴더를 만들어서 up, down파일을 직접 만들어서 관리함
+// DBA라는 직군분이 담당,
+// --현재 버전이 무엇인지 기록
+// --다음 버전이 필요하면(DB에 뭔가 변화가 있었다면 다시 sql 02버전으로 만듦)
+// config파일에 DB버전도 함께 기록해서 버전이 안맞으면 크래시나게끔
+// --> 굉장히 귀찮음, 다운그레이드, 업그레이드 부분을 다 만들어줘야함
+// 
+// 두번째는 아주 간단한 ORM을 직접 만드는 것
+// XML파일로 자동화파일을 만듦
+// Main>DB>XML파일 만들기
+// --> 이런걸로 깃에 푸시해서 이런식으로 만들어달라고 하고, DBBind와 같은 애들도 자동으로 생성
+// 
+
+#include "pch.h"
+#include "ThreadManager.h"
+#include "Service.h"
+#include "Session.h"
+#include "GameSession.h"
+#include "GameSessionManager.h"
+#include "BufferWriter.h"
+#include "ClientPacketHandler.h"
+#include <tchar.h>
+#include "Protocol.pb.h"
+#include "Job.h"
+#include "Room.h"
+#include "Player.h"
+#include "DBConnectionPool.h"
+#include "DBBInd.h"
+#include "XmlParser.h"
+
+enum
+{
+	WORKER_TICK = 64
+};
+
+void DoWorkerJob(ServerServiceRef& service)
+{
+	while (true)
+	{
+		LEndTickCount = ::GetTickCount64() + WORKER_TICK;
+
+		service->GetIocpCore()->Dispatch(10);
+
+		ThreadManager::DistributeReservedJobs();
+
+		ThreadManager::DoGlobalQueueWork();
+	}
+}
+
+class Knight : public enable_shared_from_this<Knight>
+{
+public:
+	void HealMe(int32 value)
+	{
+		cout << "Heal Me!" << value << endl;
+	}
+
+	void Test()
+	{
+		auto job = [self = shared_from_this()]()
+		{
+			self->HealMe(self->_hp);
+		};
+	}
+private:
+	int32 _hp = 100;
+};
+
+
+int main()
+{
+	// 파싱이 되는지 궁금하니까 breakpoint로 걸어서 
+	XmlNode root;
+	XmlParser parser;
+	// GameDB.XMl을 파싱, root를 추출해오게 됨
+	if (parser.ParseFromFile(L"GameDB.xml", OUT root) == false)
+		return 0;
+
+	// table로 root를 하나씩 파싱하고 있음, <Table> table을 다 찾아주고 있음,
+	Vector<XmlNode> tables = root.FindChildren(L"Table");
+	for (XmlNode& table : tables)
+	{
+		// name이라는 애를 추출, 
+		// 오류뜨는 부분은 잘못뜨고 있는 것, 빌드도 되고 실행도 됨
+		String name = table.GetStringAttr(L"name");
+		String desc = table.GetStringAttr(L"desc"); // 설명, 추가적인 정보 기입할때
+
+		Vector<XmlNode> columns = table.FindChildren(L"Column");
+		for (XmlNode& column : columns)
+		{
+			// 얘네를 메모리에 들고있게
+			String colName = column.GetStringAttr(L"name");
+			String colType = column.GetStringAttr(L"type");
+			bool nullable = !column.GetBoolAttr(L"notnull", false);
+			String identity = column.GetStringAttr(L"identity");
+			String colDefault = column.GetStringAttr(L"default");
+			// Etc...
+		}
+
+		// non-clustered 등도 있을 수 있으니까
+		Vector<XmlNode> indices = table.FindChildren(L"Index");
+		for (XmlNode& index : indices)
+		{
+			String indexType = index.GetStringAttr(L"type");
+			bool primaryKey = index.FindChild(L"PrimaryKey").IsValid();
+			bool uniqueConstraint = index.FindChild(L"UniqueKey").IsValid();
+
+			// 어떤 컬럼을 대상으로 index가 걸려잇는지도
+			Vector<XmlNode> columns = index.FindChildren(L"Column");
+			for (XmlNode& column : columns)
+			{
+				String colName = column.GetStringAttr(L"name");
+			}
+		}
+	}
+
+	Vector<XmlNode> procedures = root.FindChildren(L"Procedure");
+	for (XmlNode& procedure : procedures)
+	{
+		String name = procedure.GetStringAttr(L"name");
+		String body = procedure.FindChild(L"Body").GetStringValue();
+
+		Vector<XmlNode> params = procedure.FindChildren(L"Param");
+		for (XmlNode& param : params)
+		{
+			String paramName = param.GetStringAttr(L"name");
+			String paramType = param.GetStringAttr(L"type");
+			// TODO..
+		}
+	}
+
+	ASSERT_CRASH(GDBConnectionPool->Connect(1, L"Driver={ODBC Driver 17 for SQL Server};Server=(localdb)\\MSSQLLocalDB;Database=ServerDb;Trusted_Connection=Yes;"));
+
+	// xml 내용을 긁어서 파싱할 수 있어야함
+	// xml 같은 경우는 c#에서는 내부에 있지만
+	// c++에서는 표준에선 지원하진 않아서 외부 라이브러리를 갖고오기
+	// 굳이 xml parser를 만드는 일은 미친 짓, 너무 방대함
+	// serverCore에 xml이라는 필터 추가
+	// --> google에 rapid xml
+	// --> 소스코드를 올려드릴테니 거기서 다운받아오래 ㅎㅎ.. 복붙
+	// 라이브러리 설치가 아니라 소스코드만 있으면 사용ㅇ 가능
+	// Utils에 FileUtils. 클래스 만들어주기, XML helper도 마들어주기
+	// 
+	// 파일 입출력하는 부분은 그렇게 중요한? 내용이 아니라서 복붙한 뒤에 설명만 해주신대
+	// 
+	// 
+	// 
+	//{
+	//	auto query = L"										\
+	//		DROP TABLE IF EXISTS [dbo].[Gold];				\
+	//		CREATE TABLE [dbo].[Gold]						\
+	//		(												\
+	//			[id] INT NOT NULL PRIMARY KEY IDENTITY,		\
+	//			[gold] INT NULL,							\
+	//			[name] NVARCHAR(50) NULL,					\
+	//			[createDate] DATETIME NULL					\
+	//		);";
+
+	//	DBConnection* dbConn = GDBConnectionPool->Pop();
+	//	ASSERT_CRASH(dbConn->Execute(query));
+	//	GDBConnectionPool->Push(dbConn);
+	//}
+
+	//for (int32 i = 0; i < 3; i++)
+	//{
+	//	DBConnection* dbConn = GDBConnectionPool->Pop();
+
+	//	DBBind<3, 0> dbBind(*dbConn, L"INSERT INTO [dbo].[Gold]([gold], [name], [createDate]) VALUES(?, ?, ?)");
+
+	//	int32 gold = 100;
+	//	dbBind.BindParam(0, gold);
+	//	WCHAR name[100] = L"루키스";
+	//	dbBind.BindParam(1, name);
+	//	TIMESTAMP_STRUCT ts = { 2021, 6, 5 }; // y, m, d 순서대로 되어있어서 2021, 6, 5 넣어도됨
+	//	dbBind.BindParam(2, ts);
+
+	//	ASSERT_CRASH(dbBind.Execute());
+	//	GDBConnectionPool->Push(dbConn);
+	//}
+
+	//{
+	//	DBConnection* dbConn = GDBConnectionPool->Pop();
+	//	dbConn->Unbind();
+
+	//	DBBind<1, 4> dbBind(*dbConn, L"SELECT id, gold, name, createDate FROM [dbo].[Gold] WHERE gold = (?)");
+
+	//	int32 gold = 100;
+	//	dbBind.BindParam(0, gold);
+
+	//	int32 outId = 0;
+	//	int32 outGold = 0;
+	//	WCHAR outName[100];
+	//	TIMESTAMP_STRUCT outDate = {};
+
+	//	dbBind.BindCol(0, OUT outId);
+	//	dbBind.BindCol(1, OUT outGold);
+	//	dbBind.BindCol(2, OUT outName);
+	//	dbBind.BindCol(3, OUT outDate);
+
+	//	ASSERT_CRASH(dbBind.Execute());
+
+	//	wcout.imbue(locale("kor"));
+	//	while (dbConn->Fetch())
+	//	{
+	//		wcout << "id : " << outId << " Gold : " << outGold << " Name: " << outName << endl;
+	//		wcout << "Date : " << outDate.year << "/" << outDate.month << "/" << outDate.day << endl;
+	//	}
+	//	GDBConnectionPool->Push(dbConn);
+	//}
+
+
+	ClientPacketHandler::Init();
+
+	ServerServiceRef service = MakeShared<ServerService>(
+		NetAddress(L"127.0.0.1", 7777),
+		MakeShared<IocpCore>(),
+		MakeShared<GameSession>, // TODO : SessionManager 등
+		100);
+
+	ASSERT_CRASH(service->Start());
+
+	for (int32 i = 0; i < 5; i++)
+	{
+		GThreadManager->Launch([&service]()//[=]()
+			{
+				while (true)
+				{
+					DoWorkerJob(service);
+				}
+			});
+	}
+
+	DoWorkerJob(service);
+
+	GThreadManager->Join();
+}

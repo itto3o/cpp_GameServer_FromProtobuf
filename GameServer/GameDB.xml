@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--utf-8로 하는게 싫다면 파일>다른이름으로저장>저장옵션>인코딩하여저장>다른애로 바꿔줄 수 있음
+    파일은 근데 utf-8이 많음, 영문도 많으니까-->
+<GameDB> <!--root노드 만들기-->
+  <Table name="Gold" desc="골드 테이블">
+    <Column name="id" type="int" notnull="true"/>
+    <Column name="gold" type="int" notnull="false"/>
+    <Column name="name" type="nvarchar(50)" notnull="false"/>
+    <Column name="createDate" type="datetime" notnull="false"/>
+    <!-- primary key index가 하나 있으니까 index설계, primary key니까 clustered-->
+    <index type="clustered">
+      <PrimaryKey/>>
+      <Column name="id"/>
+    </index>
+  </Table>
+  
+  <!--insert into 등의 쿼리를 procedure로 만들어줌, 실질적인 기능들도 정의,
+      나중에 call spInsertGold 이런식으로 호출하게 됨-->
+  <Procedure name="spInsertGold">
+    <Param name="@Gold" type="int"/> <!--나중에 ?의 값으로 대체할 것이기 때문에 @붙임-->
+    <Param name="@name" type="nvarchar(50)"/>
+    <Param name="@createDate" type="datetime"/>
+    <Body>
+      <!--코드를 복붙하기 보다는 xml에서 인정하는 문법인 CDATA 사용,
+          CDATA에 넣으면 파싱하지 않고 하나의 데이터로 묶어서 인정-->
+      <![CDATA[
+      INSERT INTO [dbo].[Gold]([gold], [name], [createDate]) VALUES(@gold, @name, @createDate);
+      ]]>
+    </Body>
+  </Procedure>
+
+  <Procedure name="spGetGold">
+    <Param name="@Gold" type="int"/>
+    <Body>
+      <![CDATA[
+      SELECT id, gold, name, createDate FROM [dbo].[Gold] WHERE gold = (@gold);
+      ]]>
+    </Body>
+  </Procedure>
+</GameDB>
