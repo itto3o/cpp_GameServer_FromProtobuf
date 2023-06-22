@@ -25,6 +25,9 @@
     <Filter Include="XML">
       <UniqueIdentifier>{88a7d185-4d1c-4a5b-8646-92c7f5466e3c}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Log">
+      <UniqueIdentifier>{1c05624e-ea75-4d70-a26d-82ebefb255d7}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="CorePch.h">
@@ -150,6 +153,15 @@
     <ClInclude Include="XmlParser.h">
       <Filter>XML</Filter>
     </ClInclude>
+    <ClInclude Include="ConsoleLog.h">
+      <Filter>Log</Filter>
+    </ClInclude>
+    <ClInclude Include="DBModel.h">
+      <Filter>DB</Filter>
+    </ClInclude>
+    <ClInclude Include="DBSynchronizer.h">
+      <Filter>DB</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="CorePch.cpp">
@@ -247,6 +259,15 @@
     </ClCompile>
     <ClCompile Include="XmlParser.cpp">
       <Filter>XML</Filter>
+    </ClCompile>
+    <ClCompile Include="ConsoleLog.cpp">
+      <Filter>Log</Filter>
+    </ClCompile>
+    <ClCompile Include="DBModel.cpp">
+      <Filter>DB</Filter>
+    </ClCompile>
+    <ClCompile Include="DBSynchronizer.cpp">
+      <Filter>DB</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

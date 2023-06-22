@@ -1386,7 +1386,7 @@ int main()
 */
 
 // XML Parser
-/* 2023-06-20 */
+/* 2023-06-20
 // 포폴용으로는 지금도 차고 넘치지만, 기업용이나 실제 라이브를 운영한다고 하면 신경써야할 부분이 있음
 // 버전관리 : 자료많음, Git 등등, 버전으로 돌아가고 싶다 등
 // 라이브에서는 항상 최신 버전을 배포하는게 아님, 한 번 안정화해서 버그가 수정되면
@@ -1612,6 +1612,189 @@ int main()
 	//	GDBConnectionPool->Push(dbConn);
 	//}
 
+
+	ClientPacketHandler::Init();
+
+	ServerServiceRef service = MakeShared<ServerService>(
+		NetAddress(L"127.0.0.1", 7777),
+		MakeShared<IocpCore>(),
+		MakeShared<GameSession>, // TODO : SessionManager 등
+		100);
+
+	ASSERT_CRASH(service->Start());
+
+	for (int32 i = 0; i < 5; i++)
+	{
+		GThreadManager->Launch([&service]()//[=]()
+			{
+				while (true)
+				{
+					DoWorkerJob(service);
+				}
+			});
+	}
+
+	DoWorkerJob(service);
+
+	GThreadManager->Join();
+}
+*/
+
+// ORM
+/* 2023-06-22 */
+// 분석만 하는게 아니라 DB를 업데이트 하는 것까지(일종의 ORM)
+// 현재 DB상태를 긁어와서 xml 파일의 구조와 일치하는지 파악한 후
+// 일치하지 않는다면 바뀐 부분만 업데이트 해주는 방식으로
+// 좀더 예쁘게, 색색으로? 로그를 찍어보기 위해 filter추가
+// 로그를 하나의 스레드만 담당하게 해서 걔는 로그만 찍게하는 경우도 종종 있는데
+// 그렇게까지 로그를 많이 찍을건 아니라서 그냥 모두가 다 접근해서 lock걸지 않고 사용하게끔
+// 
+// DBModel : xml에서건 db에서건 긁어서 사용하는 db정보를 모델링하기 위한 클래스
+// DBSynchronizer로 싱크를 맞춰줌, DB에 저장해줌
+// 
+// 내용이 길어서 내용은 모두 복붙...
+// 
+// DBModel의 내용은 컨텐츠 단에서 모두 사용할 수 있는 거라서 namespace를 만들어서 사용할건데,
+// 그걸 DBModel {  } 이런식으로 파일 내부에서 만들어도 되지만
+// 탭으로 한칸 띄워서 나머지 애들이 들어가는게 조금 안 예쁠 수도 있음
+// --> 프로젝트에 따라서 매크로를 만들어서 사용하는 방식도 있어서 매크로로 만듦
+// --> CoreMacro.h에 매크로 두개를 추가
+// 
+// sql server기준으로 만든거라 다른 걸로 만들었다면 코드가 수정되어야 할 수 있음
+// 
+// store procedure를 만들어놨는데 이런 부분을 잘 파싱해서
+// DBSynchronizer에서 gettable이라던가 그런 부분을 자동화하지 않아서 한땀한땀 만들어놨는데
+// 이 부분을 procedure를 파싱해서 자동화하는 부분을 생성해줄 수 있다고 하면 더 편해짐
+// 클래스를 생성하는 부담까지 생각할 필요없이 자동적으로 몇개의 인자를 받아주고 있는지,
+// 문구를 분석해서 인자 개수까지 생각하게 된다면..!
+//
+#include "pch.h"
+#include "ThreadManager.h"
+#include "Service.h"
+#include "Session.h"
+#include "GameSession.h"
+#include "GameSessionManager.h"
+#include "BufferWriter.h"
+#include "ClientPacketHandler.h"
+#include <tchar.h>
+#include "Protocol.pb.h"
+#include "Job.h"
+#include "Room.h"
+#include "Player.h"
+#include "DBConnectionPool.h"
+#include "DBBInd.h"
+#include "XmlParser.h"
+#include "DBSynchronizer.h"
+
+enum
+{
+	WORKER_TICK = 64
+};
+
+void DoWorkerJob(ServerServiceRef& service)
+{
+	while (true)
+	{
+		LEndTickCount = ::GetTickCount64() + WORKER_TICK;
+
+		service->GetIocpCore()->Dispatch(10);
+
+		ThreadManager::DistributeReservedJobs();
+
+		ThreadManager::DoGlobalQueueWork();
+	}
+}
+
+class Knight : public enable_shared_from_this<Knight>
+{
+public:
+	void HealMe(int32 value)
+	{
+		cout << "Heal Me!" << value << endl;
+	}
+
+	void Test()
+	{
+		auto job = [self = shared_from_this()]()
+		{
+			self->HealMe(self->_hp);
+		};
+	}
+private:
+	int32 _hp = 100;
+};
+
+
+int main()
+{
+	//XmlNode root;
+	//XmlParser parser;
+	//if (parser.ParseFromFile(L"GameDB.xml", OUT root) == false)
+	//	return 0;
+
+	//Vector<XmlNode> tables = root.FindChildren(L"Table");
+	//for (XmlNode& table : tables)
+	//{
+	//	String name = table.GetStringAttr(L"name");
+	//	String desc = table.GetStringAttr(L"desc"); // 설명, 추가적인 정보 기입할때
+
+	//	Vector<XmlNode> columns = table.FindChildren(L"Column");
+	//	for (XmlNode& column : columns)
+	//	{
+	//		String colName = column.GetStringAttr(L"name");
+	//		String colType = column.GetStringAttr(L"type");
+	//		bool nullable = !column.GetBoolAttr(L"notnull", false);
+	//		String identity = column.GetStringAttr(L"identity");
+	//		String colDefault = column.GetStringAttr(L"default");
+	//		// Etc...
+	//	}
+
+	//	Vector<XmlNode> indices = table.FindChildren(L"Index");
+	//	for (XmlNode& index : indices)
+	//	{
+	//		String indexType = index.GetStringAttr(L"type");
+	//		bool primaryKey = index.FindChild(L"PrimaryKey").IsValid();
+	//		bool uniqueConstraint = index.FindChild(L"UniqueKey").IsValid();
+
+	//		Vector<XmlNode> columns = index.FindChildren(L"Column");
+	//		for (XmlNode& column : columns)
+	//		{
+	//			String colName = column.GetStringAttr(L"name");
+	//		}
+	//	}
+	//}
+
+	//Vector<XmlNode> procedures = root.FindChildren(L"Procedure");
+	//for (XmlNode& procedure : procedures)
+	//{
+	//	String name = procedure.GetStringAttr(L"name");
+	//	String body = procedure.FindChild(L"Body").GetStringValue();
+
+	//	Vector<XmlNode> params = procedure.FindChildren(L"Param");
+	//	for (XmlNode& param : params)
+	//	{
+	//		String paramName = param.GetStringAttr(L"name");
+	//		String paramType = param.GetStringAttr(L"type");
+	//		// TODO..
+	//	}
+	//}
+
+	// 현재 DB에 접근
+	ASSERT_CRASH(GDBConnectionPool->Connect(1, L"Driver={ODBC Driver 17 for SQL Server};Server=(localdb)\\MSSQLLocalDB;Database=ServerDb;Trusted_Connection=Yes;"));
+
+	// DBConnection을 하나 꺼내와서
+	// DBSynchronizer를 on
+	DBConnection* dbConn = GDBConnectionPool->Pop();
+	DBSynchronizer dbSync(*dbConn);
+	dbSync.Synchronize(L"GameDB.xml");
+	// --> 버전이 바뀌어서 column이 하나추가가 되었다고가정하면
+	//     <Column name="test" type="int" notnull="false"/>
+	// sync로 인해 자동으로 갱신,
+	// 라이브에서 갱신하는건 좀 위험하니까 라이브에선 sql query를만들어서
+	// 서버 뜨기 전에 직접 db가 쿼리를 돌리도록,
+	// 개발할땐 편하게 이런식으로
+	// 난 근데 왜 index 생성 로그는 안뜨지..? 실제로 생성이 안됐네
+	// index로 해놔서(Index여야 하는데) 그래서 그런듯 오 됐다!
 
 	ClientPacketHandler::Init();
 

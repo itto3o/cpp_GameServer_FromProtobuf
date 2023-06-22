@@ -3,15 +3,15 @@
     파일은 근데 utf-8이 많음, 영문도 많으니까-->
 <GameDB> <!--root노드 만들기-->
   <Table name="Gold" desc="골드 테이블">
-    <Column name="id" type="int" notnull="true"/>
+    <Column name="id" type="int" notnull="true" identity="1,1"/>
     <Column name="gold" type="int" notnull="false"/>
     <Column name="name" type="nvarchar(50)" notnull="false"/>
     <Column name="createDate" type="datetime" notnull="false"/>
     <!-- primary key index가 하나 있으니까 index설계, primary key니까 clustered-->
-    <index type="clustered">
+    <Index type="clustered">
       <PrimaryKey/>>
       <Column name="id"/>
-    </index>
+    </Index>
   </Table>
   
   <!--insert into 등의 쿼리를 procedure로 만들어줌, 실질적인 기능들도 정의,
