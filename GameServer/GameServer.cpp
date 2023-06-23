@@ -1641,7 +1641,7 @@ int main()
 */
 
 // ORM
-/* 2023-06-22 */
+/* 2023-06-22
 // 분석만 하는게 아니라 DB를 업데이트 하는 것까지(일종의 ORM)
 // 현재 DB상태를 긁어와서 xml 파일의 구조와 일치하는지 파악한 후
 // 일치하지 않는다면 바뀐 부분만 업데이트 해주는 방식으로
@@ -1795,6 +1795,242 @@ int main()
 	// 개발할땐 편하게 이런식으로
 	// 난 근데 왜 index 생성 로그는 안뜨지..? 실제로 생성이 안됐네
 	// index로 해놔서(Index여야 하는데) 그래서 그런듯 오 됐다!
+
+	ClientPacketHandler::Init();
+
+	ServerServiceRef service = MakeShared<ServerService>(
+		NetAddress(L"127.0.0.1", 7777),
+		MakeShared<IocpCore>(),
+		MakeShared<GameSession>, // TODO : SessionManager 등
+		100);
+
+	ASSERT_CRASH(service->Start());
+
+	for (int32 i = 0; i < 5; i++)
+	{
+		GThreadManager->Launch([&service]()//[=]()
+			{
+				while (true)
+				{
+					DoWorkerJob(service);
+				}
+			});
+	}
+
+	DoWorkerJob(service);
+
+	GThreadManager->Join();
+}
+*/
+
+// Procedure Generator
+/* 2023-06-23 */
+// procedure부분을 파싱해서 DBSync의 클래스들을 자동 생성하게끔
+// 언어는 통일해서 하는게 좋으니까
+// packet generator와 마찬가지로 파이썬으로 만들 예정
+// Tools에 새프로젝트>python 애플리케이션>
+// ProcedureGenerator 우클릭>추가>새 항목>XMLDBParser
+// 오늘도 복붙^ㅁ^
+//
+// generator를 jinja2로 만들어놓은 다음에,
+// 지난강의땐 MakeExe파일을 만들어서 GenPackets.exe를 만들었었음
+// (오늘도 똑같이)
+// 
+// MakeExe.bat을 수정한 후 실행시켜 실행파일이 만들어지면 옮겨주기
+// GenProc.exe를 복사해서 Common쪽에 폴더를 만들고 복붙
+// 
+// 아니 선생님 설명해주시는거 파일에 주석으로 달아놨었는데
+// 그거때문인지 batch파일이 실행이 안돼서
+// 결국 다시 다 복붙해서 만들었음..
+// 
+// 설명해주신거 여기다 다시 적어놓자면,
+// 
+// ProcedureGenerator.py에서 xmlParser를 만들어서넘겨준 경로로 xml을 파싱하겠다
+// 
+// xmldbparser.py는 ET를 이용해서 파싱,
+// table, procedures목록을 들고 있는데,
+// parse_xml을 호출하면 루트 노드를 기반으로 하나씩 파고 들어가면서 쫙 파싱
+// Table, procedures를 파싱하는데 인덱스까지 풀로 파싱하는게 아니라 필요한 부분만 파싱하게 되어있음
+// table이라고 하면 Table(chlid)를 하는데 table을 만들어서 child를 건네줌
+// 생성자에서 해당 child를 타고 들어가면서 column을 분석(대략적으로 필요한 정보만)
+// Procdeure함수에서도 name을 추출한 다음에 Param과 Body를 분석
+// ParseColumns은 쿼리문에서 필요한 인자들 개수, 등등을 분석
+// (select ___, ___, ___, from [dbo].[Gold] 이런식으로 써져있다면,
+// select의 rfind로 index를 찾고, from또한 index를 구해서 그 사이의 인자들을 꺼내옴
+// 각각 단어의 무엇이 들어있는지도(,로 split)
+// from의 [ ]도 없애주고 있음
+// makeQuestion은 ?형태로 만들어줘야하기때문에 그 부분으로 만들어주고있음
+// 
+// Procedures.h에는 DBSynchronizer.h의 부분이 만들어지는 부분
+// macro를 만들 수 있는데, lower_first는 text의첫문자만 소문자로 만들어주는 기능의 함수(macro)를 만듦
+// case별로 함수를 만들어주기 위해서
+// param이 무엇인지 분석해서 알맞는 코드를 만들어주고 있음
+// loop.index에서 for문에서 몇번째 index인지 추출할 수 있음(jinja2)
+// prams|length는 param의 개수들을 알 수 있음
+// 
+// GenProcedures.h에서는 macro를 만들어서 Procedures.h를 포함시ㅣ는데, 가독성을 위해 따로 만들어놨음
+// 
+// 
+// xml이 수정되면 자동으로 헤더파일도 수정되게끔 만들어주기
+// GameServer 속성에서 빌드이벤트에 가서, 편집을 해서 하나를 더 만들어줌
+// 나왜 gameserver 빌드이벤트 안걸려잇냐..? 근데 어떻게 이게 되고 있는거냐...?
+// 
+// 전에 만들었던 packet Generator가 서버, 클라 모두 등록되어 있어서 컴파일이 너무 빈번하게 일어나는중이라
+// 클라의 Protocol 폴더는 날려주기
+// --> vcproj?파일이었나 거기서 클라의 그 파일의 inputitem?의 genPacekt관련은 다 없애주고
+// Gameserver에는 gameDB.xml을 추가해주기
+// 
+// GenProcedures.h같은 경우는 pch.h에 전역으로 사용할 수 있게 넣어놔도 되ㅡㄴ데
+// 그건 너무 빌드양이 많아질 수 있읜까 필요할때추가해주도록
+// 
+// xml파일을 기준으로 버전관리를 하면서 DB에 대한 정보를 기록함
+// 
+// 
+// Part4 완료~~
+// ?
+// Protocol파일을 다 날리면 안되고 pb.cc, pb.h파일은 필요하대
+// 
+// 더미 클라를 500으로 바꿔도 정상실행되고,
+// 전반적으로 복습한다면
+// 언리얼엔진 연동으로 그래픽적으로 안보여서 뭔가 하고 있다는 느낌은 아닌데,
+// 클라가 나간다고해도 서버가 크래시나지않고 정상종료되고 있음
+// 
+// 맨 먼저 스레드와 관련된 애들
+// 스레드 생성, 아토믹 타입, 락 개념, 락 구현 방법, 데드락 현상, 락을 구현하는 연습
+// 스핀락, 슬립, 이벤트 방식으로 표준에 등장하는 condition valiable, future등을 알아봄 
+// stack queue, lock free 구조, 스레드 관련한 부분, 데드락 프로파일러로 데드락 감지
+//
+// 우리만의 xnew, xdelete로 관리,
+// 각종 할당자로 stomp로는 메모리 오염을 잡고
+// 메모리 풀링으로 할당기를 붙여서 메모리가 자동으로 관리되도록
+// 다이나믹 cast대신 type cast도 알게됨
+// 
+// 소켓 프로그래밍 기초,
+// tcp, udp, 블로킹, 논블로킹, 네트워크입출력 모델에 대한 실습
+// 
+// 네트워크 라이브러리
+// iocp모델을 이용해서 쌓아올림 --> 몇백 몇천도 가능
+// 
+// 패킷 직렬화
+// 개념, 기법들이 있는지 실습, protobuf 방식을 연동, 자동화 코드를 만들어서 컨텐츠 편리하게 작업
+// -->자동화돼서 처리되고 있음, proto 파일만 바꿔서 빌드해도 자동으로 재생성됨
+// 
+// lock 방식이 아니라 jobQueue를 만드는 이유, 이슈, 방법들에 대한 것들
+// 
+// DB연동
+// odbc를 이용해서 디비를 붙이는 거에, db편리하게 mapper클래스 만들어서 관리,
+// db 버전 관리에는 어떠한 이슈가 있는지,
+// DB를 xml로 버전 관리, --> 컬럼을 추가하고 다시 빌드를 하면 자동화된 코드에 의해 편리하게 관리
+// 다시 서버를 띄우면 DB까지 갱신,
+// procedure 같은 경우에도 자동화된툴을 이용해서 편리하게 활용
+// 
+// --> MMO건 아니건 서버 프로그래머가 기본적으로 알아야된 교양을 모두 알게 됨
+//
+#include "pch.h"
+#include "ThreadManager.h"
+#include "Service.h"
+#include "Session.h"
+#include "GameSession.h"
+#include "GameSessionManager.h"
+#include "BufferWriter.h"
+#include "ClientPacketHandler.h"
+#include <tchar.h>
+#include "Protocol.pb.h"
+#include "Job.h"
+#include "Room.h"
+#include "Player.h"
+#include "DBConnectionPool.h"
+#include "DBBInd.h"
+#include "XmlParser.h"
+#include "DBSynchronizer.h"
+#include "GenProcedures.h"
+
+enum
+{
+	WORKER_TICK = 64
+};
+
+void DoWorkerJob(ServerServiceRef& service)
+{
+	while (true)
+	{
+		LEndTickCount = ::GetTickCount64() + WORKER_TICK;
+
+		service->GetIocpCore()->Dispatch(10);
+
+		ThreadManager::DistributeReservedJobs();
+
+		ThreadManager::DoGlobalQueueWork();
+	}
+}
+
+class Knight : public enable_shared_from_this<Knight>
+{
+public:
+	void HealMe(int32 value)
+	{
+		cout << "Heal Me!" << value << endl;
+	}
+
+	void Test()
+	{
+		auto job = [self = shared_from_this()]()
+		{
+			self->HealMe(self->_hp);
+		};
+	}
+private:
+	int32 _hp = 100;
+};
+
+
+int main()
+{
+	ASSERT_CRASH(GDBConnectionPool->Connect(1, L"Driver={ODBC Driver 17 for SQL Server};Server=(localdb)\\MSSQLLocalDB;Database=ServerDb;Trusted_Connection=Yes;"));
+
+	DBConnection* dbConn = GDBConnectionPool->Pop();
+	DBSynchronizer dbSync(*dbConn);
+	dbSync.Synchronize(L"GameDB.xml");
+
+	{
+		// 이름 같은 경우는 바로 전달해줄 수 없도록 해놔서
+		// 직접 만들어서 전달해주도록
+		WCHAR name[] = L"Rookiss"; //이미 들고있는 애들을 넘겨줄 확률이 높긴 해서
+		//만약 필요하다면 자동화 툴을 고쳐주기
+
+		SP::InsertGold insertGold(*dbConn);
+		insertGold.In_Gold(100);
+		insertGold.In_Name(name);
+		insertGold.In_CreateDate(TIMESTAMP_STRUCT{ 2020,6,8 });
+		insertGold.Execute();
+	}
+
+	// select하는 부분
+	{
+		SP::GetGold getGold(*dbConn);
+		getGold.In_Gold(100);
+
+		int32 id = 0;
+		int32 gold = 0;
+		WCHAR name[100];
+		TIMESTAMP_STRUCT date;
+
+		// out은 안넣어줘도 되지만 습관상
+		// 레퍼런스로 전달 받는데 값이 고쳐지는걸 OUT으로 고쳐지기를 선호해서
+		getGold.Out_Id(OUT id);
+		getGold.Out_Gold(OUT gold);
+		getGold.Out_Name(OUT name);
+		getGold.Out_CreateDate(OUT date);
+
+		getGold.Execute();
+
+		while (getGold.Fetch())
+		{
+			GConsoleLogger->WriteStdOut(Color::BLUE,
+				L"ID[%d] Gold[%d] Name[%s]\n", id, gold, name);
+		}
+	}
+
 
 	ClientPacketHandler::Init();
 
